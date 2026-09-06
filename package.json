@@ -1,0 +1,10 @@
+{
+  "name": "paneless", "version": "0.1.0", "private": true, "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1", "build": "tsc -b && vite build", "check": "tsc -b",
+    "tauri": "tauri", "bench:generate": "node scripts/generate-benchmarks.mjs",
+    "test:ui": "node scripts/test-ui.mjs"
+  },
+  "dependencies": { "@tauri-apps/api": "^2", "@tauri-apps/plugin-dialog": "^2", "@tauri-apps/plugin-opener": "^2", "react": "^19", "react-dom": "^19", "highlight.js": "^11.11.1" },
+  "devDependencies": { "@tauri-apps/cli": "^2", "@types/react": "^19", "@types/react-dom": "^19", "@vitejs/plugin-react": "latest", "typescript": "^5.9", "vite": "latest", "playwright": "latest" }
+}

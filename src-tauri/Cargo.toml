@@ -1,0 +1,42 @@
+[package]
+name = "paneless"
+version = "0.1.0"
+description = "A quiet, fast reader for Markdown"
+authors = ["Paneless contributors"]
+edition = "2021"
+default-run = "paneless"
+
+[lib]
+name = "paneless_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+pulldown-cmark = "0.13"
+notify = "8"
+url = "2"
+percent-encoding = "2"
+tempfile = "3"
+tiny_http = { version = "0.12", optional = true }
+
+[features]
+bench-server = ["dep:tiny_http"]
+
+[[bin]]
+name = "bench-server"
+path = "src/bin/bench-server.rs"
+required-features = ["bench-server"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
