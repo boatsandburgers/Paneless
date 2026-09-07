@@ -1,1 +1,26 @@
-{"identifier":"main","description":"Local reader shell only","windows":["main"],"permissions":["core:default","core:window:allow-set-title","dialog:allow-open","dialog:allow-confirm",{"identifier":"opener:allow-open-url","allow":[{"url":"https://*"},{"url":"http://*"},{"url":"mailto:*"}]}]}
+{
+  "identifier": "main",
+  "description": "Local reader shell only",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-title",
+    "dialog:allow-open",
+    "dialog:allow-confirm",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://*"
+        },
+        {
+          "url": "mailto:*"
+        }
+      ]
+    },
+    "core:window:allow-close"
+  ]
+}

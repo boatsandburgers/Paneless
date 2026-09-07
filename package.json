@@ -1,10 +1,36 @@
 {
-  "name": "paneless", "version": "0.1.0", "private": true, "type": "module",
+  "name": "paneless",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1", "build": "tsc -b && vite build", "check": "tsc -b",
-    "tauri": "tauri", "bench:generate": "node scripts/generate-benchmarks.mjs",
-    "test:ui": "node scripts/test-ui.mjs"
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "check": "tsc -b",
+    "tauri": "tauri",
+    "bench:generate": "node scripts/generate-benchmarks.mjs",
+    "test:ui": "node scripts/test-ui.mjs",
+    "format": "prettier --write src scripts *.json *.ts && cargo fmt --manifest-path src-tauri/Cargo.toml",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
+    "bench:server": "cargo run --release --manifest-path src-tauri/Cargo.toml --features bench-server --bin bench-server",
+    "test:desktop": "node scripts/test-desktop-events.mjs"
   },
-  "dependencies": { "@tauri-apps/api": "^2", "@tauri-apps/plugin-dialog": "^2", "@tauri-apps/plugin-opener": "^2", "react": "^19", "react-dom": "^19", "highlight.js": "^11.11.1" },
-  "devDependencies": { "@tauri-apps/cli": "^2", "@types/react": "^19", "@types/react-dom": "^19", "@vitejs/plugin-react": "latest", "typescript": "^5.9", "vite": "latest", "playwright": "latest" }
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "highlight.js": "^11.11.1",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.1.1",
+    "playwright": "^1.63.0",
+    "prettier": "3.9.6",
+    "typescript": "^5.9",
+    "vite": "^8.2.2"
+  }
 }

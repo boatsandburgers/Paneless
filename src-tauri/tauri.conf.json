@@ -32,10 +32,7 @@
     "shortDescription": "A quiet, fast reader for Markdown",
     "fileAssociations": [
       {
-        "ext": [
-          "md",
-          "markdown"
-        ],
+        "ext": ["md", "markdown"],
         "name": "Markdown document",
         "description": "Markdown text document",
         "mimeType": "text/markdown",
