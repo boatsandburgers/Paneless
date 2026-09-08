@@ -132,7 +132,116 @@ fn image_url(s: &str, id: u64) -> String {
         format!("mdimage://localhost/{id}/{encoded}")
     }
 }
+fn escape_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+/// A leading `---` YAML block, read as flat `key: value` pairs (inline
+/// `[a, b]` lists and `- item` block lists are flattened to text). Returns the
+/// pairs and the byte length of the block, or None when the file has no
+/// closing fence within 200 lines — then it is ordinary Markdown and the
+/// parser sees every byte.
+fn frontmatter(source: &str) -> Option<(Vec<(String, String)>, usize)> {
+    let rest = source
+        .strip_prefix("---\n")
+        .or_else(|| source.strip_prefix("---\r\n"))?;
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    let mut consumed = source.len() - rest.len();
+    for (n, line) in rest.split_inclusive('\n').enumerate() {
+        if n >= 200 {
+            return None;
+        }
+        consumed += line.len();
+        let raw = line.trim_end_matches(['\n', '\r']);
+        if raw == "---" || raw == "..." {
+            return Some((pairs, consumed));
+        }
+        let item = raw.trim_start();
+        if item.starts_with("- ") && raw.starts_with(' ') {
+            if let Some(last) = pairs.last_mut() {
+                if !last.1.is_empty() {
+                    last.1.push_str(", ");
+                }
+                last.1.push_str(unquote(item[2..].trim()));
+            }
+            continue;
+        }
+        if raw.starts_with('#') || raw.trim().is_empty() {
+            continue;
+        }
+        if let Some((k, v)) = raw.split_once(':') {
+            if !raw.starts_with(' ') && !k.trim().is_empty() {
+                let v = v.trim();
+                let v = v
+                    .strip_prefix('[')
+                    .and_then(|x| x.strip_suffix(']'))
+                    .map(|x| {
+                        x.split(',')
+                            .map(|e| unquote(e.trim()))
+                            .filter(|e| !e.is_empty())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_else(|| unquote(v).to_string());
+                pairs.push((k.trim().to_string(), v));
+            }
+        }
+    }
+    None
+}
+fn unquote(v: &str) -> &str {
+    v.strip_prefix('"')
+        .and_then(|x| x.strip_suffix('"'))
+        .or_else(|| v.strip_prefix('\'').and_then(|x| x.strip_suffix('\'')))
+        .unwrap_or(v)
+}
+fn frontmatter_html(pairs: &[(String, String)]) -> String {
+    let mut out = String::from("<dl class=\"frontmatter\">");
+    for (k, v) in pairs {
+        out.push_str("<div><dt>");
+        out.push_str(&escape_html(k));
+        out.push_str("</dt><dd>");
+        out.push_str(&escape_html(v));
+        out.push_str("</dd></div>");
+    }
+    out.push_str("</dl>");
+    out
+}
 pub fn render(source: &str, id: u64) -> (Vec<String>, Vec<Heading>, Vec<String>) {
+    // Frontmatter renders as a compact key/value strip instead of what
+    // CommonMark would make of it (a rule, then one setext heading holding
+    // every field). The inbox summary skips the same block for titles.
+    let (meta, source) = match frontmatter(source) {
+        Some((pairs, len)) if !pairs.is_empty() => (Some(pairs), &source[len..]),
+        _ => (None, source),
+    };
+    let (mut chunks, headings, mut texts) = render_markdown(source, id);
+    if let Some(pairs) = meta {
+        let html = frontmatter_html(&pairs);
+        let text = pairs
+            .iter()
+            .map(|(k, v)| format!("{k} {v} "))
+            .collect::<String>();
+        if chunks.is_empty() {
+            chunks.push(html);
+            texts.push(text);
+        } else {
+            chunks[0].insert_str(0, &html);
+            texts[0].insert_str(0, &text);
+        }
+    }
+    (chunks, headings, texts)
+}
+fn render_markdown(source: &str, id: u64) -> (Vec<String>, Vec<Heading>, Vec<String>) {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
@@ -308,6 +417,29 @@ mod tests {
         assert!(s.contains("<table>"));
         assert!(s.contains("type=\"checkbox\""));
         assert!(s.contains("<del>"));
+    }
+    #[test]
+    fn frontmatter_becomes_a_meta_strip() {
+        let (c, h, t) = render(
+            "---\nid: GB-7\nstatus: ready\narea: [ios, server]\nblocked-on: \"JK: rule\"\nrefs:\n  - a\n  - b\n---\n\n# GB-7 — Title\n\nbody\n",
+            1,
+        );
+        let s = c.concat();
+        assert!(s.starts_with("<dl class=\"frontmatter\">"));
+        assert!(s.contains("<dt>status</dt><dd>ready</dd>"));
+        assert!(s.contains("<dd>ios, server</dd>"));
+        assert!(s.contains("<dd>JK: rule</dd>"));
+        assert!(s.contains("<dd>a, b</dd>"));
+        assert!(!s.contains("<hr"));
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].text, "GB-7 — Title");
+        assert!(t[0].contains("status ready"));
+        // An unterminated fence is not frontmatter: the rule stays a rule.
+        let (c, _, _) = render("---\nnot: closed\n\ntext", 1);
+        assert!(c.concat().contains("<hr"));
+        // No body at all still opens.
+        let (c, _, _) = render("---\nk: v\n---\n", 1);
+        assert!(c.concat().contains("<dt>k</dt>"));
     }
     #[test]
     fn resource_confinement() {

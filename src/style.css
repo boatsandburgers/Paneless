@@ -801,3 +801,30 @@ button svg {
     padding: 18px;
   }
 }
+
+/* Frontmatter (a leading --- block) is shown as a key/value strip, not as
+   the rule-plus-heading CommonMark would make of it. */
+.prose .frontmatter {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 1rem;
+  row-gap: 0.15rem;
+  margin: 0 0 1.75rem;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.82em;
+  line-height: 1.45;
+  border: 1px solid color-mix(in srgb, var(--muted) 28%, transparent);
+  border-radius: 8px;
+}
+.prose .frontmatter > div {
+  display: contents;
+}
+.prose .frontmatter dt {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+.prose .frontmatter dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
