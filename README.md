@@ -134,7 +134,7 @@ With the development server and Rust adapter running, `npm run test:inbox` uses 
 
 ## Contextual agent handoff (0.3)
 
-Select a passage and click **Ask agent** (⌘⇧A / Ctrl+Shift+A), or open it without a selection to reference the whole document. Add your instruction, then choose:
+Select a passage and click **Ask agent** (⌘⇧A / Ctrl+Shift+A), or open it without a selection to reference the whole document. Add your instruction (optional — with none, the handoff asks the agent to read the section and ask what you want), then choose:
 
 - **Copy for agent:** paste the instruction and context into any agent conversation.
 - **Open in Codex:** opens the installed app with a draft and the local workspace. Context is also copied. Long prompts use a workspace-only link; paste into the new composer when prompted. Nothing is submitted automatically.

@@ -39,7 +39,7 @@ export default function AgentHandoff({
     };
   }, [snapshot]);
   const act = async (action: "copy" | "codex" | "claude") => {
-    if (!instruction.trim() || pending || !context) return;
+    if (pending || !context) return;
     setPending(true);
     setError("");
     setMessage("");
@@ -131,7 +131,7 @@ export default function AgentHandoff({
         </p>
       )}
       <label className="handoff-instruction">
-        What should the agent do?
+        What should the agent do? <span className="handoff-optional">optional</span>
         <textarea
           autoFocus
           value={instruction}
@@ -157,19 +157,19 @@ export default function AgentHandoff({
       <div className="handoff-actions">
         <button
           className="handoff-primary"
-          disabled={!context || !instruction.trim() || pending}
+          disabled={!context || pending}
           onClick={() => void act("copy")}
         >
           Copy for agent
         </button>
         <button
-          disabled={!native || !context || !instruction.trim() || pending}
+          disabled={!native || !context || pending}
           onClick={() => void act("codex")}
         >
           Open in Codex
         </button>
         <button
-          disabled={!context || !instruction.trim() || pending}
+          disabled={!context || pending}
           onClick={() => void act("claude")}
         >
           Copy Claude Code command
