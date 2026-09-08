@@ -50,12 +50,13 @@ try {
           /<script type="module" src="\/src\/bootstrap\.tsx[^\"]*"><\/script>/,
           `<script type="module">
           import { mockIPC, mockWindows } from '/node_modules/@tauri-apps/api/mocks.js';
-          mockWindows('main'); window.copied=''; window.opened=null; window.failCodex=false;
+          mockWindows('main'); window.copied=''; window.opened=null; window.openedClaude=null; window.failCodex=false;
           mockIPC(async (name,args) => {
             if(name==='take_pending')return ${JSON.stringify(file)};
             if(name==='set_dirty'||name.startsWith('plugin:window|'))return;
             if(name==='plugin:clipboard-manager|write_text'){window.copied=args.text;return;}
             if(name==='open_codex'){ if(window.failCodex)throw Error('Codex unavailable. Context copied.'); window.opened=args; return false; }
+            if(name==='open_claude'){ window.openedClaude=args; return true; }
             const r=await fetch('/api/'+name,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(args)}); const value=await r.json();if(!r.ok)throw Error(value.error);return value;
           }, {shouldMockEvents:true});
           await import('/src/bootstrap.tsx');
@@ -137,6 +138,14 @@ try {
         await modal.getByRole("alert").textContent(),
         /Context copied/,
       );
+      await modal
+        .getByRole("button", { name: "Open in Claude Code", exact: true })
+        .click();
+      await page.waitForFunction(() => window.openedClaude !== null);
+      const openedClaude = await page.evaluate(() => window.openedClaude);
+      assert.equal(openedClaude.workspace, temp);
+      assert.equal(openedClaude.prompt, await page.evaluate(() => window.copied));
+      await modal.getByRole("status").getByText(/Opened in Claude Code/).waitFor();
       await modal
         .getByRole("button", { name: "Copy Claude Code command", exact: true })
         .click();

@@ -286,6 +286,7 @@ pub fn run() {
             open_document,
             handoff::handoff_context,
             handoff::open_codex,
+            handoff::open_claude,
             document_chunks,
             document_source,
             save_document,

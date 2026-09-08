@@ -38,7 +38,7 @@ export default function AgentHandoff({
       previous?.focus();
     };
   }, [snapshot]);
-  const act = async (action: "copy" | "codex" | "claude") => {
+  const act = async (action: "copy" | "codex" | "claude" | "claude-open") => {
     if (pending || !context) return;
     setPending(true);
     setError("");
@@ -58,7 +58,18 @@ export default function AgentHandoff({
           await import("@tauri-apps/plugin-clipboard-manager")
         ).writeText(text);
       else await navigator.clipboard.writeText(text);
-      if (action === "codex") {
+      if (action === "claude-open") {
+        const included = await command<boolean>("open_claude", {
+          id: snapshot.info.id,
+          workspace: fresh.workspace,
+          prompt,
+        });
+        setMessage(
+          included
+            ? "Opened in Claude Code: a terminal session with the prompt filled in, not sent. Context also copied."
+            : "Opened Claude Code in the workspace. The prompt was too long for the link; paste it (it is copied).",
+        );
+      } else if (action === "codex") {
         const included = await command<boolean>("open_codex", {
           id: snapshot.info.id,
           workspace: fresh.workspace,
@@ -169,6 +180,12 @@ export default function AgentHandoff({
           Open in Codex
         </button>
         <button
+          disabled={!native || !context || pending}
+          onClick={() => void act("claude-open")}
+        >
+          Open in Claude Code
+        </button>
+        <button
           disabled={!context || pending}
           onClick={() => void act("claude")}
         >
@@ -176,8 +193,8 @@ export default function AgentHandoff({
         </button>
       </div>
       <p className="handoff-hint">
-        Codex opens a draft for review. The Claude Code command starts a session
-        when you run it.
+        Codex opens a draft for review. Claude Code opens a terminal session
+        with the prompt filled in; nothing is sent until you press Enter.
       </p>
       <p className="handoff-result" role="status">
         {pending ? "Preparing handoff…" : message}

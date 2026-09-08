@@ -43,6 +43,21 @@ pub fn codex_url(workspace: &str, prompt: &str) -> (String, bool) {
     }
 }
 
+// Claude Code's own deep link: opens a new terminal session in `workspace`
+// with the prompt pre-filled and NOT sent (the handler shows "Prompt from an
+// external link" until the user presses Enter). `q` is capped at 5,000
+// characters by the handler; longer prompts travel on the clipboard instead.
+pub fn claude_url(workspace: &str, prompt: &str) -> (String, bool) {
+    let mut url = url::Url::parse("claude-cli://open").unwrap();
+    url.query_pairs_mut().append_pair("cwd", workspace);
+    let base = url.clone();
+    if prompt.chars().count() > 5000 {
+        return (base.into(), false);
+    }
+    url.query_pairs_mut().append_pair("q", prompt);
+    (url.into(), true)
+}
+
 #[tauri::command]
 pub async fn handoff_context(app: tauri::AppHandle, id: u64) -> Result<Context, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -70,6 +85,29 @@ pub fn open_codex(
     let (url, included) = codex_url(&workspace, &prompt);
     app.opener().open_url(url, None::<&str>).map_err(|e| {
         format!("Could not open Codex. Your context is copied; paste it into your agent. {e}")
+    })?;
+    Ok(included)
+}
+
+#[tauri::command]
+pub fn open_claude(
+    app: tauri::AppHandle,
+    id: u64,
+    workspace: String,
+    prompt: String,
+) -> Result<bool, String> {
+    let doc = app.state::<Reader>().get(id)?;
+    if !Path::new(&workspace).is_absolute() || !Path::new(&doc.info.path).starts_with(&workspace) {
+        return Err("The handoff workspace no longer contains this document.".into());
+    }
+    if prompt.len() > 100_000 {
+        return Err("This handoff is too long. Use Copy for agent.".into());
+    }
+    let (url, included) = claude_url(&workspace, &prompt);
+    app.opener().open_url(url, None::<&str>).map_err(|e| {
+        format!(
+            "Could not open Claude Code. Its link handler registers after the first prompt of an interactive `claude` session on this Mac. Your context is copied. {e}"
+        )
     })?;
     Ok(included)
 }
@@ -111,5 +149,16 @@ mod tests {
         let (value, included) = codex_url("/project", &"大".repeat(2000));
         assert!(!included);
         assert!(!value.contains("prompt="));
+        let (value, included) = claude_url("/project/a & b", prompt);
+        assert!(included);
+        let parsed = url::Url::parse(&value).unwrap();
+        assert_eq!(parsed.scheme(), "claude-cli");
+        assert_eq!(parsed.host_str(), Some("open"));
+        let pairs: std::collections::HashMap<_, _> = parsed.query_pairs().collect();
+        assert_eq!(pairs["cwd"], "/project/a & b");
+        assert_eq!(pairs["q"], prompt);
+        let (value, included) = claude_url("/project", &"x".repeat(5001));
+        assert!(!included);
+        assert!(!value.contains("q="));
     }
 }
