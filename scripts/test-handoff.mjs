@@ -6,6 +6,8 @@ import { join } from "node:path";
 
 const temp = await realpath(await mkdtemp(join(tmpdir(), "paneless-handoff-")));
 try {
+  const prompt =
+    'Explain "café" & $(echo UNSAFE) `echo UNSAFE`\nIt\'s <context> 第二行';
   const file = join(temp, "report.md");
   await writeFile(join(temp, ".git"), "gitdir: elsewhere");
   for (const [name, engine] of [
