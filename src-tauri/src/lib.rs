@@ -1,4 +1,5 @@
 pub mod document;
+pub mod handoff;
 mod inbox;
 pub mod project;
 use document::{Document, Info};
@@ -253,6 +254,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(Reader::default())
         .manage(Inbox::default())
@@ -282,6 +284,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_document,
+            handoff::handoff_context,
+            handoff::open_codex,
             document_chunks,
             document_source,
             save_document,

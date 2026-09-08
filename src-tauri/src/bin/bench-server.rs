@@ -20,6 +20,14 @@ fn main() {
         let args: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
         let result: Result<serde_json::Value, String> = (|| {
             Ok(match request.url() {
+                "/api/handoff_context" => {
+                    let doc = reader.get(args["id"].as_u64().unwrap())?;
+                    serde_json::to_value(paneless_lib::handoff::context(
+                        &doc,
+                        project.as_ref().map(|p| p.root.clone()),
+                    ))
+                    .unwrap()
+                }
                 "/api/project_open" => {
                     project = Some(paneless_lib::project::Project::open(
                         std::path::Path::new(args["path"].as_str().unwrap_or("")),

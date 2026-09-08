@@ -785,3 +785,19 @@ button svg {
   color: var(--accent);
   border-radius: 5px;
 }
+
+.agent-button {
+  white-space: nowrap;
+  padding: 7px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .agent-button {
+    padding: 6px;
+    font-size: 11px;
+  }
+  .handoff-dialog {
+    padding: 18px;
+  }
+}

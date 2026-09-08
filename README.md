@@ -23,7 +23,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --features bench
 npm run tauri build
 ```
 
-**macOS:** Install Xcode / its command-line tools and Rust's native Apple target. `npm run tauri -- build --bundles app,dmg` produces an app and DMG in `src-tauri/target/release/bundle/`. This checkout was built and run on Apple Silicon. An Intel build requires the `x86_64-apple-darwin` Rust target; a universal build uses Tauri's `--target universal-apple-darwin` with both Apple targets installed. Distribution still needs your Developer ID, signing configuration, and [notarization](https://v2.tauri.app/distribute/sign/macos/). The generated local build is not a notarized public release. If Finder automation is unavailable, `CI=true npm run tauri -- build --bundles app,dmg` skips decorative DMG layout; this produced the verified 2.6 MB installer on this host.
+**macOS:** Install Xcode / its command-line tools and Rust's native Apple target. `npm run tauri -- build --bundles app,dmg` produces an app and DMG in `src-tauri/target/release/bundle/`. This checkout was built and run on Apple Silicon. An Intel build requires the `x86_64-apple-darwin` Rust target; a universal build uses Tauri's `--target universal-apple-darwin` with both Apple targets installed. Distribution still needs your Developer ID, signing configuration, and [notarization](https://v2.tauri.app/distribute/sign/macos/). The generated local build is not a notarized public release. If Finder automation is unavailable, `CI=true npm run tauri -- build --bundles app,dmg` skips decorative DMG layout; this produces the installer on this host.
 
 **Windows:** Install the Visual Studio C++ desktop build tools, Windows SDK, WebView2, and stable Rust's MSVC toolchain. Run the same commands from PowerShell. Tauri bundles the executable into Windows installers; Authenticode signing requires your certificate/configuration. Windows compilation and Explorer integration are included in the implementation and CI configuration, but have not been executed on this macOS host.
 
@@ -50,7 +50,8 @@ export RUSTUP_HOME=/tmp/paneless-rustup
 | Cmd/Ctrl+0 | Reset type size |
 | Cmd/Ctrl+F | Find in document |
 | Cmd/Ctrl+S | Save source |
-| Escape | Close appearance or find controls |
+| Cmd/Ctrl+Shift+A | Ask an agent about the document or selection |
+| Escape | Close appearance, find, or agent handoff |
 
 ## Architecture and parser choice
 
@@ -130,3 +131,19 @@ This release does not run agents, sync Git, schedule reports, render Mermaid, or
 ### Inbox verification
 
 With the development server and Rust adapter running, `npm run test:inbox` uses the real Rust parser/index and Tauri's official IPC/event mock in Chromium and WebKit. It verifies baselining, content changes versus timestamp touches, pins/history across reopening, exact-revision acknowledgement, folder/search filters, bounded initial lists, keyboard navigation, relative links, auto-refresh, and unsaved-edit protection. Screenshots are written to `test-results/`. Rust tests additionally exercise exclusions, symlink confinement, same-metadata writes, deletion/reappearance, and cache persistence. Browser event mocks are supplemented by native macOS watch verification described in `docs/verification.md`.
+
+## Contextual agent handoff (0.3)
+
+Select a passage and click **Ask agent** (⌘⇧A / Ctrl+Shift+A), or open it without a selection to reference the whole document. Add your instruction, then choose:
+
+- **Copy for agent:** paste the instruction and context into any agent conversation.
+- **Open in Codex:** opens the installed app with a draft and the local workspace. Context is also copied. Long prompts use a workspace-only link; paste into the new composer when prompted. Nothing is submitted automatically.
+- **Copy Claude Code command:** paste into Terminal (macOS/Linux, POSIX shell) or PowerShell (Windows). Running the command changes into the workspace and starts an interactive `claude` session with the prompt. Claude Code must already be installed and configured. Existing conversations can use Copy for agent instead.
+
+The handoff includes the absolute file path, the selection's starting section/anchor when available, rendered text, and the rendered content fingerprint (not a Git commit). The selected project is used when it contains the file; otherwise Paneless finds the nearest Git root, including worktrees, or uses the document folder. Expand **Review included context** to inspect the complete payload and workspace before handing it off. A section is the selection's starting section; a quotation can span multiple sections. Selections above 12,000 Unicode characters are explicitly shortened; whole-file contents are not copied automatically.
+
+The reader pauses automatic refresh while the handoff is open. Disk content is checked when preparing the dialog and again before each action; changed or unavailable files are identified in both the UI and the copied context. The quotation remains a snapshot of what you were reading. Agents should verify the current file before acting. If another document is opened through the OS during composition, the action fails with a stale-document message; the instruction remains available to copy manually.
+
+The composer and its styles load on demand. Paneless uses Tauri's official clipboard plugin with write-text permission only, and has no embedded model, AI credentials, or background agent processes. Quoted Markdown is reference data, kept separate from your instruction. Generic Markdown links cannot launch an agent. Provider routes follow the [official Codex deep-link reference](https://learn.chatgpt.com/docs/reference/commands#deep-links) and [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference).
+
+With the development server and Rust adapter running, `npm run test:handoff` verifies selection/heading capture, clipboard payloads, changed-file snapshots, provider failures, modal behavior, narrow layouts, and POSIX command argument preservation in Chromium and WebKit. Provider launches are mocked; the tests do not submit prompts to agents. Rust tests cover workspace detection, content changes, URL encoding, and the long-prompt fallback.

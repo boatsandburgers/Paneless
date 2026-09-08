@@ -17,6 +17,8 @@ import {
 import "./style.css";
 import LargeReader from "./LargeReader";
 import Outline from "./Outline";
+import { captureHandoff, type Handoff } from "./handoff";
+const AgentHandoff = lazy(() => import("./AgentHandoff"));
 const ProjectInbox = lazy(() => import("./ProjectInbox"));
 type Settings = {
   theme: "light" | "dark" | "system";
@@ -114,6 +116,12 @@ export default function App() {
   const [doc, setDoc] = useState<OpenResult | null>(null);
   const docRef = useRef(doc);
   docRef.current = doc;
+  const [handoff, setHandoff] = useState<Handoff | null>(null);
+  const handoffRef = useRef(handoff);
+  handoffRef.current = handoff;
+  const askAgent = () => {
+    if (doc && !editing && !busy) setHandoff(captureHandoff(doc.info));
+  };
   const [settings, setSettings] = useState(initialSettings);
   const [preferences, setPreferences] = useState(false);
   const [outline, setOutline] = useState(false);
@@ -348,6 +356,7 @@ export default function App() {
               !editingRef.current &&
               !dirtyRef.current &&
               !busyRef.current &&
+              !handoffRef.current &&
               !globalThis.getSelection()?.toString()
             )
               void openPath(e.payload, true);
@@ -389,6 +398,7 @@ export default function App() {
   }, [openPath, report]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (handoffRef.current) return;
       if (e.key === "Escape") {
         setPreferences(false);
         setFind(false);
@@ -397,6 +407,12 @@ export default function App() {
       if (["o", "s", "+", "=", "-", "0", "f"].includes(e.key.toLowerCase()))
         e.preventDefault();
       switch (e.key.toLowerCase()) {
+        case "a":
+          if (e.shiftKey) {
+            e.preventDefault();
+            askAgent();
+          }
+          break;
         case "[":
           e.preventDefault();
           navigateHistory(-1);
@@ -575,6 +591,17 @@ export default function App() {
           )}
         </div>
         <div className="bar-right">
+          {doc && !editing && (
+            <button
+              className="agent-button"
+              title={`Ask an agent (${modifier}Shift+A)`}
+              disabled={busy}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={askAgent}
+            >
+              Ask agent
+            </button>
+          )}
           {doc && (
             <button
               className={`icon-button ${editing ? "selected" : ""}`}
@@ -890,6 +917,11 @@ export default function App() {
             <p>Your next good read.</p>
           </div>
         </div>
+      )}
+      {handoff && (
+        <Suspense fallback={null}>
+          <AgentHandoff snapshot={handoff} onClose={() => setHandoff(null)} />
+        </Suspense>
       )}
     </div>
   );
