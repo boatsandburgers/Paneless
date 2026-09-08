@@ -25,6 +25,7 @@ pub struct Info {
     pub path: String,
     pub name: String,
     pub bytes: usize,
+    pub revision: String,
     pub headings: Vec<Heading>,
     pub chunks: usize,
     pub read_ms: f64,
@@ -63,17 +64,18 @@ pub fn load(path: &Path, id: u64) -> Result<Document, String> {
     let base = path.parent().unwrap().to_path_buf();
     let parse_start = Instant::now();
     let (chunks, headings, texts) = render(&source, id);
+    let fingerprint = fingerprint(&source);
     let info = Info {
         id,
         path: path.to_string_lossy().into(),
         name: path.file_name().unwrap().to_string_lossy().into(),
         bytes: source.len(),
+        revision: format!("{fingerprint:016x}"),
         headings,
         chunks: chunks.len(),
         read_ms,
         parse_ms: parse_start.elapsed().as_secs_f64() * 1000.,
     };
-    let fingerprint = fingerprint(&source);
     Ok(Document {
         info,
         chunks,
@@ -103,8 +105,19 @@ fn slug(text: &str) -> String {
         s
     }
 }
+pub fn relative_markdown_link(s: &str) -> bool {
+    let path = s.split('#').next().unwrap_or("");
+    let Ok(decoded) = percent_encoding::percent_decode_str(path).decode_utf8() else {
+        return false;
+    };
+    !decoded.is_empty()
+        && !decoded.starts_with(['/', '\\'])
+        && !decoded.contains([':', '?', '\\'])
+        && is_markdown(Path::new(decoded.as_ref()))
+}
 fn safe_link(s: &str) -> bool {
-    s.starts_with('#')
+    relative_markdown_link(s)
+        || s.starts_with('#')
         || url::Url::parse(s).is_ok_and(|u| matches!(u.scheme(), "http" | "https" | "mailto"))
 }
 fn image_url(s: &str, id: u64) -> String {

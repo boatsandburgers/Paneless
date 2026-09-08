@@ -13,11 +13,12 @@ await page.route("http://127.0.0.1:1420/", async (route) => {
   const response = await route.fetch();
   let html = await response.text();
   html = html.replace(
-    /<script type="module" src="\/src\/main\.tsx[^\"]*"><\/script>/,
+    /<script type="module" src="\/src\/bootstrap\.tsx[^\"]*"><\/script>/,
     `<script type="module">
     import { mockIPC, mockWindows } from '/node_modules/@tauri-apps/api/mocks.js';
-    mockWindows('main'); window.testPending = null; window.testOpenedURL = null;
+    mockWindows('main'); window.testCalls = []; window.testPending = null; window.testOpenedURL = null;
     mockIPC(async (name,args) => {
+      window.testCalls.push(name);
       if(name === 'take_pending') {const p=window.testPending;window.testPending=null;return p;}
       if(name === 'set_dirty') return;
       if(name === 'plugin:dialog|open') return ${JSON.stringify(welcome)};
@@ -27,7 +28,7 @@ await page.route("http://127.0.0.1:1420/", async (route) => {
       const response=await fetch('/api/'+name,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(args)});
       const result=await response.json(); if(!response.ok) throw Error(result.error); return result;
     },{shouldMockEvents:true});
-    await import('/src/main.tsx');
+    await import('/src/bootstrap.tsx');
   </script>`,
   );
   await route.fulfill({ response, body: html });
@@ -76,9 +77,21 @@ await page.evaluate(async (path) => {
   const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
   await emit("open-file", null);
 }, welcome);
-await page.waitForFunction(
-  () => document.querySelector(".file-title")?.textContent === "welcome.md",
-);
+await page
+  .waitForFunction(
+    () => document.querySelector(".file-title")?.textContent === "welcome.md",
+  )
+  .catch(async (error) => {
+    console.log(
+      await page.locator("body").innerText(),
+      errors,
+      await page.evaluate(() => ({
+        calls: window.testCalls,
+        pending: window.testPending,
+      })),
+    );
+    throw error;
+  });
 await page.waitForFunction(
   () =>
     document.querySelector(".prose h1")?.textContent ===

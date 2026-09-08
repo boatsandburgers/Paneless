@@ -2,6 +2,8 @@
 use paneless_lib::Reader;
 fn main() {
     let reader = Reader::default();
+    let storage = tempfile::tempdir().unwrap();
+    let mut project: Option<paneless_lib::project::Project> = None;
     let server = tiny_http::Server::http("127.0.0.1:1421").unwrap();
     println!("Benchmark adapter on http://127.0.0.1:1421 (development only)");
     for mut request in server.incoming_requests() {
@@ -18,6 +20,44 @@ fn main() {
         let args: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
         let result: Result<serde_json::Value, String> = (|| {
             Ok(match request.url() {
+                "/api/project_open" => {
+                    project = Some(paneless_lib::project::Project::open(
+                        std::path::Path::new(args["path"].as_str().unwrap_or("")),
+                        storage.path(),
+                    )?);
+                    serde_json::to_value(project.as_ref().unwrap().snapshot()).unwrap()
+                }
+                "/api/project_refresh" => {
+                    let p = project.as_mut().ok_or("No project")?;
+                    p.scan(&std::collections::HashSet::new(), true)?;
+                    serde_json::to_value(p.snapshot()).unwrap()
+                }
+                "/api/project_mark" => {
+                    let p = project.as_mut().ok_or("No project")?;
+                    p.mark(args["path"].as_str(), args["revision"].as_str())?;
+                    serde_json::to_value(p.snapshot()).unwrap()
+                }
+                "/api/project_pin" => {
+                    let p = project.as_mut().ok_or("No project")?;
+                    p.pin(
+                        args["path"].as_str().unwrap(),
+                        args["pinned"].as_bool().unwrap(),
+                    )?;
+                    serde_json::to_value(p.snapshot()).unwrap()
+                }
+                "/api/project_close" => {
+                    project = None;
+                    serde_json::Value::Null
+                }
+                "/api/resolve_document_link" => {
+                    let doc = reader.get(args["id"].as_u64().unwrap())?;
+                    serde_json::to_value(paneless_lib::resolve_markdown_link(
+                        &doc,
+                        args["href"].as_str().unwrap(),
+                        project.as_ref().map(|p| p.root.clone()),
+                    )?)
+                    .unwrap()
+                }
                 "/api/open_document" => serde_json::to_value(
                     reader.open(std::path::Path::new(args["path"].as_str().unwrap_or("")))?,
                 )

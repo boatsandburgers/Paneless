@@ -29,3 +29,13 @@ Tested September 6–7, 2026 on an Apple M5 Pro, 24 GiB RAM.
 - Remote and SVG images are intentionally blocked. Resource tests cover path escape and disallowed formats; local raster image rendering was verified in the native app. Very large decoded-image memory use and every raster codec were not exhaustively tested.
 
 Screenshots and temporary test files are kept under ignored `test-results/`; synthetic documents are under ignored `benchmarks/generated/`.
+
+## 0.2 project inbox — September 8, 2026
+
+- Eight Rust tests pass, including first-scan baselines, content-versus-timestamp changes, same-metadata event invalidation, history/pins across restart, deletion/reappearance, excluded directories, symlink boundaries, and relative Markdown links. Clippy passes with warnings denied.
+- Chromium and WebKit inbox tests pass against the real Rust index and parser with official Tauri IPC/event mocks. Coverage includes unread/updated/read counts, exact-revision read acknowledgement, background updates remaining unacknowledged, pins, filters, folder selection, long-list paging, keyboard movement, back navigation, automatic refresh, and unsaved-editor protection. Light/dark/narrow screenshots were inspected.
+- The existing reader suite passes through 20 MiB in both engines, including bounded DOM, deep heading navigation, search, editing, and hostile Markdown. These regression runs used a **debug Rust adapter**; their timings are saved under ignored `test-results/inbox-debug-regression-results.json`. The earlier release benchmark numbers remain unchanged.
+- Packaged macOS verification: selected a project with the native folder picker; first two documents appeared read; a new report appeared automatically as unread; opening acknowledged it; pinning persisted during the session; followed a relative link to a sibling folder; an atomic report replacement appeared as Updated; a new nested report directory was discovered automatically; Back reopened the latest revision; an external edit refreshed the open report.
+- Fixed development-only duplicate app mounts by separating the React bootstrap from the App component. The desktop picker/drop/queued-open/external-link mock suite passes after this fix.
+- The inbox UI/CSS is a separate lazy-loaded bundle; a single-file launch does not initialize the index. No new runtime package dependencies were introduced.
+- Remaining platform limits: Windows native watch/installer behavior has not been exercised here. Signing/notarization, full Git ignore semantics, previous-content diffs, and precise semantic scroll anchoring are outside this release. The local index reflects the checkout on disk, not remote Git state.

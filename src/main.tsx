@@ -1,21 +1,23 @@
 import React, {
   Suspense,
+  lazy,
   useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
-import { createRoot } from "react-dom/client";
 import { Reader, type Metrics } from "./Reader";
 import {
   command,
   native,
   LARGE_DOCUMENT_BYTES,
+  navigateToHeading,
   type OpenResult,
 } from "./types";
 import "./style.css";
 import LargeReader from "./LargeReader";
 import Outline from "./Outline";
+const ProjectInbox = lazy(() => import("./ProjectInbox"));
 type Settings = {
   theme: "light" | "dark" | "system";
   font: number;
@@ -36,13 +38,19 @@ function initialSettings(): Settings {
 function Icon({
   name,
 }: {
-  name: "open" | "outline" | "type" | "source" | "read";
+  name: "open" | "outline" | "inbox" | "type" | "source" | "read";
 }) {
   const paths = {
     open: (
       <>
         <path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9v11H3Z" />
         <path d="M3 9h17" />
+      </>
+    ),
+    inbox: (
+      <>
+        <path d="M5 4h14l3 12v4H2v-4Z" />
+        <path d="M2 15h6l2 3h4l2-3h6M8 8h8m-9 3h10" />
       </>
     ),
     outline: (
@@ -83,19 +91,60 @@ function Icon({
     </svg>
   );
 }
-function App() {
+export default function App() {
+  const [active, setActive] = useState(
+    () => document.hasFocus() && document.visibilityState === "visible",
+  );
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  useEffect(() => {
+    const focus = () => setActive(document.visibilityState === "visible");
+    const blur = () => setActive(false);
+    const visibility = () =>
+      setActive(document.hasFocus() && document.visibilityState === "visible");
+    window.addEventListener("focus", focus);
+    window.addEventListener("blur", blur);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      window.removeEventListener("focus", focus);
+      window.removeEventListener("blur", blur);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, []);
   const [doc, setDoc] = useState<OpenResult | null>(null);
   const docRef = useRef(doc);
   docRef.current = doc;
   const [settings, setSettings] = useState(initialSettings);
   const [preferences, setPreferences] = useState(false);
   const [outline, setOutline] = useState(false);
+  const [inbox, setInbox] = useState(false);
+  const [inboxLoaded, setInboxLoaded] = useState(false);
+  const [inboxCount, setInboxCount] = useState(0);
+  const showInbox = () => {
+    setInboxLoaded(true);
+    setInbox(true);
+    setOutline(false);
+  };
   const [editing, setEditing] = useState(false);
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
   const [source, setSource] = useState("");
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const history = useRef<{ paths: string[]; index: number }>({
+    paths: [],
+    index: -1,
+  });
+  const positions = useRef(new Map<string, number>());
+  const pendingPosition = useRef<{
+    path: string;
+    top: number;
+    anchor?: string;
+  } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [changed, setChanged] = useState(false);
@@ -122,8 +171,19 @@ function App() {
         )
       : window.confirm("Discard your unsaved changes?"));
   const openPath = useCallback(
-    async (path: string, bypass = false) => {
+    async (
+      path: string,
+      bypass = false,
+      navigation?: { index?: number; anchor?: string },
+    ) => {
       if (!bypass && !(await confirmDiscard())) return;
+      if (docRef.current)
+        positions.current.set(
+          docRef.current.info.path,
+          editingRef.current
+            ? savedScroll.current
+            : scrollRef.current?.scrollTop || 0,
+        );
       const attempt = ++generation.current;
       setBusy(true);
       setError("");
@@ -137,6 +197,23 @@ function App() {
         setEditing(false);
         setLoaded(false);
         setMetrics(undefined);
+        pendingPosition.current = {
+          path: result.info.path,
+          top: positions.current.get(result.info.path) || 0,
+          anchor: navigation?.anchor,
+        };
+        if (navigation?.index !== undefined)
+          history.current.index = navigation.index;
+        else if (
+          history.current.paths[history.current.index] !== result.info.path
+        ) {
+          history.current.paths = history.current.paths.slice(
+            0,
+            history.current.index + 1,
+          );
+          history.current.paths.push(result.info.path);
+          history.current.index = history.current.paths.length - 1;
+        }
         setDoc(result);
         scrollRef.current?.scrollTo(0, 0);
         if (native)
@@ -146,6 +223,7 @@ function App() {
             .getCurrentWindow()
             .setTitle(`${result.info.name} — Paneless`);
         document.title = `${result.info.name} — Paneless`;
+        return true;
       } catch (e) {
         if (attempt === generation.current) report(e);
       } finally {
@@ -154,6 +232,11 @@ function App() {
     },
     [report],
   );
+  const navigateHistory = (delta: number) => {
+    const index = history.current.index + delta;
+    const path = history.current.paths[index];
+    if (path) void openPath(path, false, { index });
+  };
   const pick = async () => {
     try {
       if (native) {
@@ -211,7 +294,16 @@ function App() {
   };
   const openLink = async (url: string) => {
     try {
-      if (!/^(https?:|mailto:)/i.test(url)) return;
+      if (!/^(https?:|mailto:)/i.test(url)) {
+        if (doc) {
+          const [path, anchor] = await command<[string, string]>(
+            "resolve_document_link",
+            { id: doc.info.id, href: url },
+          );
+          await openPath(path, false, { anchor });
+        }
+        return;
+      }
       if (native)
         await (await import("@tauri-apps/plugin-opener")).openUrl(url);
       else window.open(url, "_blank", "noopener,noreferrer");
@@ -250,7 +342,16 @@ function App() {
         await pending();
         register(
           await listen<string>("file-changed", (e) => {
-            if (e.payload === docRef.current?.info.path) setChanged(true);
+            if (e.payload !== docRef.current?.info.path) return;
+            if (
+              activeRef.current &&
+              !editingRef.current &&
+              !dirtyRef.current &&
+              !busyRef.current &&
+              !globalThis.getSelection()?.toString()
+            )
+              void openPath(e.payload, true);
+            else setChanged(true);
           }),
         );
         const window = (
@@ -296,8 +397,17 @@ function App() {
       if (["o", "s", "+", "=", "-", "0", "f"].includes(e.key.toLowerCase()))
         e.preventDefault();
       switch (e.key.toLowerCase()) {
+        case "[":
+          e.preventDefault();
+          navigateHistory(-1);
+          break;
+        case "]":
+          e.preventDefault();
+          navigateHistory(1);
+          break;
         case "o":
-          void pick();
+          if (e.shiftKey) showInbox();
+          else void pick();
           break;
         case "s":
           void save();
@@ -396,6 +506,31 @@ function App() {
     >
       <header className="topbar">
         <div className="bar-left">
+          {doc && (
+            <>
+              <button
+                className="icon-button history-button"
+                aria-label="Back"
+                title={`Back (${modifier}[)`}
+                disabled={busy || history.current.index <= 0}
+                onClick={() => navigateHistory(-1)}
+              >
+                ‹
+              </button>
+              <button
+                className="icon-button history-button"
+                aria-label="Forward"
+                title={`Forward (${modifier}])`}
+                disabled={
+                  busy ||
+                  history.current.index >= history.current.paths.length - 1
+                }
+                onClick={() => navigateHistory(1)}
+              >
+                ›
+              </button>
+            </>
+          )}
           <button
             className="icon-button"
             title={`Open file (${modifier}O)`}
@@ -404,13 +539,26 @@ function App() {
           >
             <Icon name="open" />
           </button>
+          <button
+            className={`icon-button inbox-toggle ${inbox ? "selected" : ""}`}
+            title={`Project inbox (${modifier}Shift+O)`}
+            aria-label="Toggle project inbox"
+            aria-pressed={inbox}
+            onClick={() => (inbox ? setInbox(false) : showInbox())}
+          >
+            <Icon name="inbox" />
+            {inboxCount > 0 && <span className="inbox-dot" />}
+          </button>
           {doc && (
             <button
               className={`icon-button ${outline ? "selected" : ""}`}
               title="Document outline"
               aria-label="Toggle outline"
               aria-pressed={outline}
-              onClick={() => setOutline(!outline)}
+              onClick={() => {
+                setOutline(!outline);
+                setInbox(false);
+              }}
             >
               <Icon name="outline" />
             </button>
@@ -432,6 +580,7 @@ function App() {
               className={`icon-button ${editing ? "selected" : ""}`}
               title={editing ? "Read document" : "Edit source"}
               aria-label={editing ? "Read document" : "Edit source"}
+              disabled={busy}
               onClick={() => void toggleEdit()}
             >
               <Icon name={editing ? "read" : "source"} />
@@ -569,6 +718,27 @@ function App() {
         </form>
       )}
       <div className="body">
+        {inboxLoaded && (
+          <Suspense
+            fallback={
+              inbox ? (
+                <aside className="outline">
+                  <p className="loading-document">Opening inbox…</p>
+                </aside>
+              ) : null
+            }
+          >
+            <ProjectInbox
+              visible={inbox}
+              active={active}
+              doc={doc}
+              loaded={loaded}
+              onOpen={openPath}
+              onClose={() => setInbox(false)}
+              onCount={setInboxCount}
+            />
+          </Suspense>
+        )}
         {doc && outline && !editing && (
           <Suspense fallback={null}>
             <Outline
@@ -612,6 +782,9 @@ function App() {
                 <Icon name="open" />
                 Open File<span>{modifier}O</span>
               </button>
+              <button className="project-empty-action" onClick={showInbox}>
+                Browse a project’s Markdown →
+              </button>
               <p className="file-types">.md &nbsp; / &nbsp; .markdown</p>
             </div>
           ) : editing ? (
@@ -628,6 +801,7 @@ function App() {
                 defaultValue={source}
                 aria-label="Markdown source"
                 className="source-editor"
+                readOnly={busy}
                 spellCheck={false}
                 autoCapitalize="off"
                 autoCorrect="off"
@@ -660,7 +834,17 @@ function App() {
                           : "full",
                     };
                 }}
-                onDone={() => setLoaded(true)}
+                onDone={() => {
+                  setLoaded(true);
+                  const restore = pendingPosition.current;
+                  pendingPosition.current = null;
+                  if (restore?.path === doc.info.path)
+                    requestAnimationFrame(() => {
+                      if (docRef.current?.info.id !== doc.info.id) return;
+                      if (restore.anchor) navigateToHeading(restore.anchor);
+                      else scrollRef.current?.scrollTo(0, restore.top);
+                    });
+                }}
                 onError={report}
                 onLink={(url) => void openLink(url)}
               />
@@ -710,4 +894,3 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);

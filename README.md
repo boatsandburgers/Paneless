@@ -1,6 +1,6 @@
 # Paneless
 
-A small, quiet desktop reader for local Markdown. Open a file, drop one into the window, or double-click it in Finder or Explorer. Reading comes first; a simple source editor is there when you need it.
+A lightning-fast Markdown viewer for working with agents. Open a file, drop one into the window, or double-click it in Finder or Explorer. Reading comes first; a simple source editor is there when you need it.
 
 Tauri 2 · React 19 · TypeScript · Vite · Rust / pulldown-cmark
 
@@ -41,7 +41,7 @@ export RUSTUP_HOME=/tmp/paneless-rustup
 - The outline button shows headings, with a filter and bounded row rendering for thousands of entries. It starts hidden.
 - **Aa** controls light, dark, or system appearance, font size, and reading width. Preferences persist locally; native window size and position are restored by Tauri's window-state plugin.
 - The source button opens a plain, monospaced textarea. Save before returning to reading; unsaved changes require confirmation before replacement or close/quit.
-- File watching uses OS notifications on the containing directory, including atomic replacements. External changes show a **Reload** notice. This deliberately lets you retain your reading position or copy unsaved edits before reloading. Saving checks the original disk fingerprint and refuses to overwrite external edits. Writes use a temporary sibling file and atomic replacement while preserving permissions.
+- File watching uses OS notifications on the containing directory, including atomic replacements. External changes refresh automatically while actively reading in the foreground, retaining your scroll offset. Background updates remain unacknowledged and show a Reload notice. While editing or selecting text, a **Reload** notice lets you keep your work before reloading. Saving checks the original disk fingerprint and refuses to overwrite external edits. Writes use a temporary sibling file and atomic replacement while preserving permissions.
 
 | Shortcut | Action |
 | --- | --- |
@@ -111,3 +111,22 @@ Recorded on an Apple M5 Pro with 24 GiB RAM:
 At 100 KiB and 1 MiB, the complete DOM was inserted in about 71–79 ms and 450–462 ms respectively. For larger files, `completeMs` means the bounded reader is ready, **not that all content is mounted**. Raw measurements are in [`docs/benchmark-results.json`](docs/benchmark-results.json). The frontend shell is about 67 KB gzipped; highlighting is a deferred 21 KB gzipped chunk. The Apple Silicon app bundle is approximately 6.3 MB on disk.
 
 Automated checks cover TS/build, Rust URL/HTML/resource confinement and save conflicts, light/dark screenshots at 480/1060/1800 px, outline navigation, editing/save, empty/hostile Markdown, overflow, and large-file search/DOM bounds. Visual outputs are under ignored `test-results/`. Native macOS picker opening, Finder double-click delivery to a running instance, relative raster images, source/save, outline, external browser opening, and the packaged 20 MiB reader were exercised. Tauri’s official event mock additionally exercises the production drag/drop listener against the real Rust backend; an actual cross-window OS drop was not conclusively automated. See [`docs/verification.md`](docs/verification.md) for remaining manual platform checks.
+
+
+## Project inbox (0.2)
+
+Open **Project inbox** in the toolbar (⌘⇧O / Ctrl+Shift+O), then choose a project folder. The optional sidebar provides Recent, Unread, Updated, and Pinned views; title/preview/path search; folder filters; keyboard navigation; and Mark all read. Arrow keys move between document buttons; Enter opens one. At narrow widths, the inbox overlays the page and closes after opening a document.
+
+The first scan establishes a read baseline. Subsequently discovered paths appear as Unread; a previously read file appears as Updated when its content differs from the revision last opened. Rewriting identical content or changing timestamps does not create a new update. Pins and reading history persist locally in the OS application-data directory (`app.paneless.reader/projects`), not in the repository. Reopening a previously indexed project retains this history. The last project is reopened when you first open the inbox after launching Paneless; standalone-file startup does not start indexing.
+
+Native filesystem events are coalesced for 600 ms, with a two-second maximum batch window. The index uses content fingerprints, checks metadata before rereading unchanged files, and watches only included directories. Manual Refresh and reopening a project verify all document contents. Marking a file read acknowledges the rendered revision, so an agent's newer write remains an update. Closing a project stops its watchers but retains personal history.
+
+Hidden paths and `node_modules`, `target`, `dist`, `build`, `coverage`, `vendor`, `generated`, and `__pycache__` are excluded. Symlinks are not followed. Indexing is limited to 10,000 Markdown files, 20,000 directories, 64 directory levels, and 100 MB per file; skipped/unreadable files and scan limits produce a notice. These are fixed exclusions, not a full `.gitignore` implementation. Choose a narrower folder if your project exceeds the limits. The list initially mounts 100 documents and offers additional pages.
+
+Relative Markdown links work within the open document's directory, or anywhere inside the selected project when that project contains the current document. Canonical paths enforce the boundary, including symlinks. Back/Forward (⌘[ / ⌘], or Ctrl+[ / Ctrl+]) retain in-session scroll positions. Refresh restores a pixel offset; if content above it substantially changes, the exact paragraph can move, and large-document estimates remain approximate.
+
+This release does not run agents, sync Git, schedule reports, render Mermaid, or compare prior document contents. The inbox reflects the local checkout. “Unread” means first discovered by this index, not a claim about a file's historical creation date. All ordinary Markdown remains usable with no metadata requirements.
+
+### Inbox verification
+
+With the development server and Rust adapter running, `npm run test:inbox` uses the real Rust parser/index and Tauri's official IPC/event mock in Chromium and WebKit. It verifies baselining, content changes versus timestamp touches, pins/history across reopening, exact-revision acknowledgement, folder/search filters, bounded initial lists, keyboard navigation, relative links, auto-refresh, and unsaved-edit protection. Screenshots are written to `test-results/`. Rust tests additionally exercise exclusions, symlink confinement, same-metadata writes, deletion/reappearance, and cache persistence. Browser event mocks are supplemented by native macOS watch verification described in `docs/verification.md`.

@@ -6,6 +6,13 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      ignored: [
+        "**/src-tauri/target/**",
+        "**/test-results/**",
+        "**/benchmarks/generated/**",
+      ],
+    },
     proxy: { "/api": "http://127.0.0.1:1421" },
   },
   envPrefix: ["VITE_", "TAURI_ENV_"],

@@ -1,6 +1,6 @@
 {
   "name": "paneless",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,8 @@
     "format": "prettier --write src scripts *.json *.ts && cargo fmt --manifest-path src-tauri/Cargo.toml",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "bench:server": "cargo run --release --manifest-path src-tauri/Cargo.toml --features bench-server --bin bench-server",
-    "test:desktop": "node scripts/test-desktop-events.mjs"
+    "test:desktop": "node scripts/test-desktop-events.mjs",
+    "test:inbox": "node scripts/test-inbox.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

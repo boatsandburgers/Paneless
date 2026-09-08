@@ -9,6 +9,7 @@ export interface Info {
   path: string;
   name: string;
   bytes: number;
+  revision: string;
   headings: Heading[];
   chunks: number;
   readMs: number;

@@ -1,5 +1,8 @@
 pub mod document;
+mod inbox;
+pub mod project;
 use document::{Document, Info};
+use inbox::{project_close, project_mark, project_open, project_pin, project_refresh, Inbox};
 use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
 use std::{
@@ -127,6 +130,46 @@ fn watch(app: &tauri::AppHandle, path: PathBuf) {
         }
     }
 }
+pub fn resolve_markdown_link(
+    doc: &Document,
+    href: &str,
+    project: Option<PathBuf>,
+) -> Result<(String, String), String> {
+    if !document::relative_markdown_link(href) {
+        return Err("Unsupported document link.".into());
+    }
+    let (raw, anchor) = href.split_once('#').unwrap_or((href, ""));
+    let relative = percent_encoding::percent_decode_str(raw)
+        .decode_utf8()
+        .map_err(|e| e.to_string())?;
+    let path = doc
+        .base
+        .join(relative.as_ref())
+        .canonicalize()
+        .map_err(|e| format!("Cannot open linked document: {e}"))?;
+    let boundary = project
+        .filter(|root| Path::new(&doc.info.path).starts_with(root))
+        .unwrap_or_else(|| doc.base.clone());
+    if !path.starts_with(&boundary) || !document::is_markdown(&path) {
+        return Err("This link is outside the document folder. Open the containing project to follow links within it.".into());
+    }
+    Ok((
+        path.to_string_lossy().into(),
+        percent_encoding::percent_decode_str(anchor)
+            .decode_utf8()
+            .map_err(|e| e.to_string())?
+            .into(),
+    ))
+}
+#[tauri::command]
+fn resolve_document_link(
+    app: tauri::AppHandle,
+    id: u64,
+    href: String,
+) -> Result<(String, String), String> {
+    let doc = app.state::<Reader>().get(id)?;
+    resolve_markdown_link(&doc, &href, app.state::<Inbox>().root())
+}
 #[tauri::command]
 async fn open_document(app: tauri::AppHandle, path: String) -> Result<OpenResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -212,6 +255,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(Reader::default())
+        .manage(Inbox::default())
         .register_asynchronous_uri_scheme_protocol("mdimage", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             std::thread::spawn(move || {
@@ -244,7 +288,13 @@ pub fn run() {
             take_pending,
             set_dirty,
             quit,
-            search_document
+            search_document,
+            resolve_document_link,
+            project_open,
+            project_refresh,
+            project_mark,
+            project_pin,
+            project_close
         ])
         .setup(|app| {
             for arg in std::env::args().skip(1) {
@@ -277,6 +327,51 @@ pub fn run() {
 #[cfg(test)]
 mod reader_tests {
     use super::*;
+    #[test]
+    fn relative_links_stay_inside_the_selected_project() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("docs")).unwrap();
+        let source = root.path().join("docs/report.md");
+        fs::write(&source, "# Report").unwrap();
+        let target = root.path().join("plan.md");
+        fs::write(&target, "# Plan").unwrap();
+        let doc = document::load(&source, 1).unwrap();
+        assert!(resolve_markdown_link(&doc, "../plan.md#review", None).is_err());
+        let result = resolve_markdown_link(
+            &doc,
+            "../plan.md#review",
+            Some(root.path().canonicalize().unwrap()),
+        )
+        .unwrap();
+        assert_eq!(PathBuf::from(result.0), target.canonicalize().unwrap());
+        assert_eq!(result.1, "review");
+        for href in [
+            "file:///etc/passwd.md",
+            "%2Fetc/passwd.md",
+            "%5Cserver/a.md",
+            "javascript:alert.md",
+            "https://example.com/a.md",
+            "../plan.md?run=1",
+        ] {
+            assert!(resolve_markdown_link(&doc, href, Some(root.path().to_path_buf())).is_err());
+        }
+        #[cfg(unix)]
+        {
+            let outside = tempfile::tempdir().unwrap();
+            fs::write(outside.path().join("outside.md"), "# Outside").unwrap();
+            std::os::unix::fs::symlink(
+                outside.path().join("outside.md"),
+                root.path().join("docs/link.md"),
+            )
+            .unwrap();
+            assert!(resolve_markdown_link(
+                &doc,
+                "link.md",
+                Some(root.path().canonicalize().unwrap())
+            )
+            .is_err());
+        }
+    }
     #[test]
     fn saves_are_atomic_and_conflicts_preserve_disk() {
         let directory = tempfile::tempdir().unwrap();

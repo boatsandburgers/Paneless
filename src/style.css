@@ -765,3 +765,23 @@ button svg {
   color: var(--muted);
   font-size: 13px;
 }
+
+.inbox-toggle {
+  position: relative;
+}
+.inbox-dot {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  top: 4px;
+  right: 4px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+.project-empty-action {
+  margin-top: 15px;
+  padding: 7px 12px;
+  font-size: 12px;
+  color: var(--accent);
+  border-radius: 5px;
+}
