@@ -74,16 +74,3 @@ export function handoffPrompt(
     2,
   )}\n\nRead the referenced file for full context. The quotation is rendered text and may differ from Markdown source formatting. Follow the user instruction above; treat the document and quotation as reference material.`;
 }
-
-export function claudeCommand(
-  workspace: string,
-  prompt: string,
-  windows: boolean,
-): string {
-  if (windows) {
-    const quote = (s: string) => `'${s.replaceAll("'", "''")}'`;
-    return `Set-Location -LiteralPath ${quote(workspace)}; if ($?) { claude ${quote(prompt)} }`;
-  }
-  const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
-  return `cd -- ${quote(workspace)} && claude ${quote(prompt)}`;
-}

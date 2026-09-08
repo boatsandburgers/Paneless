@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { command, native } from "./types";
-import {
-  claudeCommand,
-  handoffPrompt,
-  type Handoff,
-  type HandoffContext,
-} from "./handoff";
+import { handoffPrompt, type Handoff, type HandoffContext } from "./handoff";
 import "./handoff.css";
 
 export default function AgentHandoff({
@@ -21,7 +16,6 @@ export default function AgentHandoff({
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const windows = /Win/.test(navigator.platform);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     dialog.current?.showModal();
@@ -38,7 +32,7 @@ export default function AgentHandoff({
       previous?.focus();
     };
   }, [snapshot]);
-  const act = async (action: "copy" | "codex" | "claude" | "claude-open") => {
+  const act = async (action: "copy" | "codex" | "claude-open") => {
     if (pending || !context) return;
     setPending(true);
     setError("");
@@ -49,15 +43,11 @@ export default function AgentHandoff({
       });
       setContext(fresh);
       const prompt = handoffPrompt(snapshot, fresh, instruction);
-      const text =
-        action === "claude"
-          ? claudeCommand(fresh.workspace, prompt, windows)
-          : prompt;
       if (native)
         await (
           await import("@tauri-apps/plugin-clipboard-manager")
-        ).writeText(text);
-      else await navigator.clipboard.writeText(text);
+        ).writeText(prompt);
+      else await navigator.clipboard.writeText(prompt);
       if (action === "claude-open") {
         const included = await command<boolean>("open_claude", {
           id: snapshot.info.id,
@@ -80,12 +70,7 @@ export default function AgentHandoff({
             ? "Opened in Codex for review. Context also copied."
             : "Context copied. Paste it into the new Codex composer.",
         );
-      } else
-        setMessage(
-          action === "claude"
-            ? `Command copied. Paste into ${windows ? "PowerShell" : "Terminal"} and run to start Claude Code.`
-            : "Copied. Paste into your agent conversation.",
-        );
+      } else setMessage("Copied. Paste into your agent conversation.");
     } catch (e) {
       setError(String(e).replace(/^Error: /, ""));
     } finally {
@@ -184,12 +169,6 @@ export default function AgentHandoff({
           onClick={() => void act("claude-open")}
         >
           Open in Claude Code
-        </button>
-        <button
-          disabled={!context || pending}
-          onClick={() => void act("claude")}
-        >
-          Copy Claude Code command
         </button>
       </div>
       <p className="handoff-hint">

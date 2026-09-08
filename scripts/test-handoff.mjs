@@ -3,30 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, realpath, writeFile, rm, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
-import { claudeCommand } from "../src/handoff.ts";
 
 const temp = await realpath(await mkdtemp(join(tmpdir(), "paneless-handoff-")));
 try {
-  // Execute against a harmless shell function to verify argument boundaries.
-  const prompt =
-    'Explain "café" & $(echo UNSAFE) `echo UNSAFE`\nIt\'s <context> 第二行';
-  const workspace = join(temp, "project ' & $(echo UNSAFE)");
-  await mkdir(workspace);
-  const shell = spawnSync(
-    "/bin/sh",
-    [
-      "-c",
-      `claude() { printf '%s' "$1"; }; ${claudeCommand(workspace, prompt, false)}`,
-    ],
-    { encoding: "utf8" },
-  );
-  assert.equal(shell.status, 0, shell.stderr);
-  assert.equal(shell.stdout, prompt);
-  assert.equal(
-    claudeCommand("C:\\a'b", "it's $x", true),
-    "Set-Location -LiteralPath 'C:\\a''b'; if ($?) { claude 'it''s $x' }",
-  );
   const file = join(temp, "report.md");
   await writeFile(join(temp, ".git"), "gitdir: elsewhere");
   for (const [name, engine] of [
@@ -146,11 +125,6 @@ try {
       assert.equal(openedClaude.workspace, temp);
       assert.equal(openedClaude.prompt, await page.evaluate(() => window.copied));
       await modal.getByRole("status").getByText(/Opened in Claude Code/).waitFor();
-      await modal
-        .getByRole("button", { name: "Copy Claude Code command", exact: true })
-        .click();
-      await page.waitForFunction(() => window.copied.startsWith("cd -- "));
-      assert.ok((await page.evaluate(() => window.copied)).includes("'\\''"));
       await page.screenshot({ path: `test-results/handoff-${name}-light.png` });
       await page.evaluate(() => {
         document.documentElement.dataset.theme = "dark";
@@ -173,7 +147,7 @@ try {
       await page.getByRole("button", { name: "Close agent handoff" }).click();
       assert.deepEqual(errors, []);
       console.log(
-        `${name}: selection, section, clipboard, stale snapshot, provider fallback, shell command, modal and narrow layout passed`,
+        `${name}: selection, section, clipboard, stale snapshot, provider fallback, Claude Code link, modal and narrow layout passed`,
       );
     } finally {
       await browser.close();
