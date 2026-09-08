@@ -43,15 +43,15 @@ pub fn codex_url(workspace: &str, prompt: &str) -> (String, bool) {
     }
 }
 
-// Claude Code's own deep link: opens a new terminal session in `workspace`
-// with the prompt pre-filled and NOT sent (the handler shows "Prompt from an
-// external link" until the user presses Enter). `q` is capped at 5,000
-// characters by the handler; longer prompts travel on the clipboard instead.
+// The Claude desktop app's Code tab: `claude://code/new` with `folder` and
+// `q`. The app treats a folder from a link as untrusted and confirms it
+// before adopting it; the prompt lands in the composer unsent. The composer
+// cap is about 14,000 characters; longer prompts travel on the clipboard.
 pub fn claude_url(workspace: &str, prompt: &str) -> (String, bool) {
-    let mut url = url::Url::parse("claude-cli://open").unwrap();
-    url.query_pairs_mut().append_pair("cwd", workspace);
+    let mut url = url::Url::parse("claude://code/new").unwrap();
+    url.query_pairs_mut().append_pair("folder", workspace);
     let base = url.clone();
-    if prompt.chars().count() > 5000 {
+    if prompt.chars().count() > 14_000 {
         return (base.into(), false);
     }
     url.query_pairs_mut().append_pair("q", prompt);
@@ -106,7 +106,7 @@ pub fn open_claude(
     let (url, included) = claude_url(&workspace, &prompt);
     app.opener().open_url(url, None::<&str>).map_err(|e| {
         format!(
-            "Could not open Claude Code. Its link handler registers after the first prompt of an interactive `claude` session on this Mac. Your context is copied. {e}"
+            "Could not open the Claude desktop app. Your context is copied; paste it into a Code session. {e}"
         )
     })?;
     Ok(included)
@@ -152,12 +152,13 @@ mod tests {
         let (value, included) = claude_url("/project/a & b", prompt);
         assert!(included);
         let parsed = url::Url::parse(&value).unwrap();
-        assert_eq!(parsed.scheme(), "claude-cli");
-        assert_eq!(parsed.host_str(), Some("open"));
+        assert_eq!(parsed.scheme(), "claude");
+        assert_eq!(parsed.host_str(), Some("code"));
+        assert_eq!(parsed.path(), "/new");
         let pairs: std::collections::HashMap<_, _> = parsed.query_pairs().collect();
-        assert_eq!(pairs["cwd"], "/project/a & b");
+        assert_eq!(pairs["folder"], "/project/a & b");
         assert_eq!(pairs["q"], prompt);
-        let (value, included) = claude_url("/project", &"x".repeat(5001));
+        let (value, included) = claude_url("/project", &"x".repeat(14_001));
         assert!(!included);
         assert!(!value.contains("q="));
     }

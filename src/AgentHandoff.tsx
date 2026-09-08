@@ -56,8 +56,8 @@ export default function AgentHandoff({
         });
         setMessage(
           included
-            ? "Opened in Claude Code: a terminal session with the prompt filled in, not sent. Context also copied."
-            : "Opened Claude Code in the workspace. The prompt was too long for the link; paste it (it is copied).",
+            ? "Opened in Claude's Code tab with the prompt filled in, not sent. Confirm the folder there. Context also copied."
+            : "Opened Claude's Code tab on the workspace. The prompt was too long for the link; paste it (it is copied).",
         );
       } else if (action === "codex") {
         const included = await command<boolean>("open_codex", {
@@ -172,8 +172,9 @@ export default function AgentHandoff({
         </button>
       </div>
       <p className="handoff-hint">
-        Codex opens a draft for review. Claude Code opens a terminal session
-        with the prompt filled in; nothing is sent until you press Enter.
+        Codex opens a draft for review. Claude Code opens the desktop app's
+        Code tab with the prompt filled in; nothing is sent until you press
+        Enter.
       </p>
       <p className="handoff-result" role="status">
         {pending ? "Preparing handoff…" : message}
