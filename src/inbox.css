@@ -1,10 +1,11 @@
 .inbox {
-  width: 324px;
-  min-width: 324px;
   display: flex;
   flex-direction: column;
   background: var(--panel);
   border-right: 1px solid var(--line);
+  width: 350px;
+  min-width: 350px;
+  --inbox-secondary: color-mix(in srgb, var(--text) 65%, var(--muted));
 }
 .inbox[hidden] {
   display: none;
@@ -13,11 +14,11 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 15px 16px 3px 22px;
-  font-size: 9px;
-  letter-spacing: 1.5px;
   color: var(--muted);
   font-weight: 650;
+  padding: 10px 16px 0 18px;
+  font-size: 10px;
+  letter-spacing: 1px;
 }
 .inbox-heading .icon-button {
   height: 24px;
@@ -26,8 +27,8 @@
 .inbox-project {
   display: flex;
   gap: 8px;
-  padding: 4px 16px 18px;
   align-items: center;
+  padding: 0 14px 12px;
 }
 .project-name {
   display: flex;
@@ -37,12 +38,12 @@
   flex: 1;
   padding: 4px 6px;
   border-radius: 5px;
-  font-size: 21px;
   font-weight: 600;
   letter-spacing: -0.6px;
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 20px;
 }
 .project-name span {
   font-size: 16px;
@@ -57,34 +58,41 @@
 .inbox-tabs {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  margin: 0 16px 15px;
-  padding: 3px;
-  gap: 2px;
-  border: 1px solid var(--line);
   border-radius: 8px;
+  margin: 0 14px 12px;
+  gap: 1px;
+  border: 0;
+  padding: 0;
 }
 .inbox-tabs button {
   border-radius: 5px;
-  font-size: 10px;
-  padding: 8px 2px;
-  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 9px 3px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--inbox-secondary);
 }
 .inbox-tabs button span {
-  display: block;
-  margin-top: 5px;
-  font-size: 13px;
   font-variant-numeric: tabular-nums;
+  display: inline;
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
 }
 .inbox-tabs button.active {
+  color: var(--text);
+  font-weight: 600;
   background: var(--bg);
-  color: var(--accent);
-  box-shadow: 0 1px 4px #00000008;
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 .inbox-filters {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 0 16px 15px;
+  padding: 0 14px 10px;
+  gap: 6px;
 }
 .inbox-filters input,
 .inbox-filters select {
@@ -100,8 +108,10 @@
 }
 .inbox-filters select {
   padding: 6px 8px;
-  color: var(--muted);
   background: transparent;
+  min-height: 31px;
+  font-size: 12px;
+  color: var(--inbox-secondary);
 }
 .inbox-list {
   overflow-y: auto;
@@ -111,57 +121,57 @@
 }
 .inbox-row {
   position: relative;
-  margin-bottom: 5px;
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  margin: 0;
+  border-radius: 0;
 }
 .inbox-row.current {
-  background: var(--bg);
   border-color: var(--line);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
+  border-radius: 6px;
+  border-bottom-color: transparent;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .inbox-open {
   display: flex;
   flex-direction: column;
   width: 100%;
   text-align: left;
-  padding: 13px 13px 12px;
-  gap: 6px;
   border-radius: 7px;
+  padding: 15px 12px;
+  gap: 7px;
 }
 .inbox-open strong {
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.4;
-  padding-right: 20px;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
   overflow-wrap: anywhere;
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.15px;
+  color: var(--text);
 }
 .inbox-row-meta {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2px;
   width: 100%;
-  font-size: 9px;
   color: var(--muted);
+  gap: 12px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
 }
 .inbox-state.unread,
 .inbox-state.updated {
   color: var(--accent);
   font-weight: 600;
-}
-.inbox-state.unread::before {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  background: var(--accent);
-  border-radius: 50%;
-  margin-right: 5px;
-  vertical-align: 1px;
 }
 .inbox-path {
   display: block;
@@ -169,29 +179,29 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
-  font-size: 10px;
   color: var(--muted);
+  min-width: 0;
+  font-size: inherit;
 }
 .inbox-preview {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  display: block;
   overflow: hidden;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--inbox-secondary);
 }
 .inbox-pin {
   position: absolute;
-  right: 8px;
-  top: 36px;
   width: 27px;
   height: 27px;
   border-radius: 5px;
   color: var(--muted);
   font-size: 16px;
   opacity: 0;
+  top: 12px;
+  right: 7px;
 }
 .inbox-row:hover .inbox-pin,
 .inbox-pin:focus-visible,
@@ -203,9 +213,9 @@
 }
 .inbox-footer {
   border-top: 1px solid var(--line);
-  padding: 12px 20px;
-  font-size: 10px;
   color: var(--muted);
+  padding: 9px 16px 7px;
+  font-size: 11px;
 }
 .inbox-footer > div {
   display: flex;
@@ -213,9 +223,9 @@
   justify-content: space-between;
 }
 .inbox-footer button {
-  font-size: 10px;
   border-radius: 4px;
   padding: 4px;
+  font-size: 11px;
 }
 .inbox-footer p {
   line-height: 1.6;
@@ -223,8 +233,8 @@
   margin: 8px 0 3px;
 }
 .inbox-stop {
-  margin-top: 6px;
   color: var(--muted);
+  margin-top: 3px;
 }
 .inbox-empty {
   padding: 45px 20px;
@@ -280,19 +290,6 @@
   font-size: 11px;
   color: var(--accent);
 }
-@media (max-width: 760px) {
-  .inbox {
-    position: absolute;
-    inset: 0 auto 0 0;
-    z-index: 6;
-    width: min(324px, 100%);
-    min-width: 0;
-    box-shadow: var(--shadow);
-  }
-  .inbox-pin {
-    opacity: 1;
-  }
-}
 
 .project-name .project-name-text {
   display: block;
@@ -303,6 +300,46 @@
   color: inherit;
   margin: 0;
 }
-.inbox-filters select {
-  min-height: 31px;
+
+/* Keep the reading hierarchy clear: title, short preview, then file details. */
+.inbox-tabs button .zero-count {
+  display: none;
+}
+.inbox-filters input {
+  font-size: 13px;
+  padding: 9px 11px;
+}
+.inbox-filters input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.inbox-row-title {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding-right: 22px;
+}
+.inbox-state {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.inbox-row-meta time {
+  flex-shrink: 0;
+}
+@media (max-width: 760px) {
+  .inbox {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 6;
+    width: min(350px, 100%);
+    min-width: 0;
+    box-shadow: var(--shadow);
+  }
+  .inbox-pin {
+    opacity: 1;
+  }
+}
+.inbox-row.current .inbox-open:hover {
+  background: transparent;
 }

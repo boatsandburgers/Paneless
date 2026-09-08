@@ -1,6 +1,6 @@
 [package]
 name = "paneless"
-version = "0.2.0"
+version = "0.2.1"
 description = "A fast Markdown viewer for working with agents"
 authors = ["Paneless contributors"]
 edition = "2021"

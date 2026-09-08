@@ -94,9 +94,7 @@ export default function ProjectInbox({
       } catch {
         /* history is stored natively */
       }
-      setHint(
-        "Existing documents start read. New discoveries appear in Unread.",
-      );
+      setHint("");
     } catch (e) {
       if (attempt === switching.current) report(e);
     } finally {
@@ -369,7 +367,9 @@ export default function ProjectInbox({
                   onClick={() => setView(item)}
                 >
                   {item}
-                  <span>{counts[item]}</span>
+                  <span className={counts[item] === 0 ? "zero-count" : ""}>
+                    {counts[item]}
+                  </span>
                 </button>
               ),
             )}
@@ -463,11 +463,24 @@ export default function ProjectInbox({
                     );
                   }}
                 >
+                  <span className="inbox-row-title">
+                    <strong>{entry.title}</strong>
+                    {status(entry) !== "Read" && (
+                      <span
+                        className={`inbox-state ${status(entry).toLowerCase()}`}
+                      >
+                        {status(entry)}
+                      </span>
+                    )}
+                  </span>
+                  {entry.preview && (
+                    <span className="inbox-preview">{entry.preview}</span>
+                  )}
                   <span className="inbox-row-meta">
-                    <span
-                      className={`inbox-state ${status(entry).toLowerCase()}`}
-                    >
-                      {status(entry) === "Read" ? "Document" : status(entry)}
+                    <span className="inbox-path" title={entry.path}>
+                      {entry.path.split("/").length > 2
+                        ? "…/" + entry.path.split("/").slice(-2).join("/")
+                        : entry.path}
                     </span>
                     <time
                       dateTime={new Date(entry.changed).toISOString()}
@@ -475,13 +488,6 @@ export default function ProjectInbox({
                     >
                       {age(entry.changed)}
                     </time>
-                  </span>
-                  <strong>{entry.title}</strong>
-                  <span className="inbox-path" title={entry.path}>
-                    {entry.path}
-                  </span>
-                  <span className="inbox-preview">
-                    {entry.preview || "An empty page, ready for words."}
                   </span>
                 </button>
                 <button
@@ -505,7 +511,7 @@ export default function ProjectInbox({
           </div>
           <div className="inbox-footer">
             <div>
-              <span>
+              <span title="Existing documents start read. New discoveries appear in Unread.">
                 {filtered.length} document{filtered.length === 1 ? "" : "s"}
               </span>
               <button
