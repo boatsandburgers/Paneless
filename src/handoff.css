@@ -10,7 +10,7 @@
   overflow-y: auto;
 }
 .handoff-dialog::backdrop {
-  background: #10151180;
+  background: #17071e8c;
 }
 .handoff-heading {
   display: flex;
