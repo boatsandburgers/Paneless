@@ -128,6 +128,8 @@ Relative Markdown links work within the open document's directory, or anywhere i
 
 This release does not run agents, sync Git, schedule reports, render Mermaid, or compare prior document contents. The inbox reflects the local checkout. “Unread” means first discovered by this index, not a claim about a file's historical creation date. All ordinary Markdown remains usable with no metadata requirements.
 
+Paneless is also the human view for a repository-local task board: one Markdown file per task, a generated `BOARD.md`, a zero-dependency script, and rules enforced by a lint and a commit hook. [docs/task-board.md](docs/task-board.md) describes the approach so another project can replicate it.
+
 ### Inbox verification
 
 With the development server and Rust adapter running, `npm run test:inbox` uses the real Rust parser/index and Tauri's official IPC/event mock in Chromium and WebKit. It verifies baselining, content changes versus timestamp touches, pins/history across reopening, exact-revision acknowledgement, folder/search filters, bounded initial lists, keyboard navigation, relative links, auto-refresh, and unsaved-edit protection. Screenshots are written to `test-results/`. Rust tests additionally exercise exclusions, symlink confinement, same-metadata writes, deletion/reappearance, and cache persistence. Browser event mocks are supplemented by native macOS watch verification described in `docs/verification.md`.
