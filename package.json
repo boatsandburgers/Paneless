@@ -15,9 +15,16 @@
     "bench:server": "cargo run --release --manifest-path src-tauri/Cargo.toml --features bench-server --bin bench-server",
     "test:desktop": "node scripts/test-desktop-events.mjs",
     "test:inbox": "node scripts/test-inbox.mjs",
-    "test:handoff": "node scripts/test-handoff.mjs"
+    "test:handoff": "node scripts/test-handoff.mjs",
+    "test:acl": "node scripts/acl-selftest.mjs"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.0",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.4",
+    "@codemirror/view": "^6.43.11",
+    "@lezer/highlight": "^1.2.3",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.3",
     "@tauri-apps/plugin-dialog": "^2",

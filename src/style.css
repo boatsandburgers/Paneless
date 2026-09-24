@@ -1,16 +1,17 @@
 :root {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color-scheme: light;
-  /* Gummybear's ink: a near-black plum, with the lava violet as the one accent. */
-  --bg: #faf8fb;
-  --panel: #f4f0f7;
-  --text: #17071e;
-  --muted: #6f6474;
-  --line: #e8e2ec;
-  --accent: #7b58d4;
-  --code: #f1ecf4;
-  --hover: #ece5f1;
-  --shadow: 0 12px 40px #17071e14;
+  /* Neutral paper with a single blue accent. */
+  --bg: #ffffff;
+  --panel: #f5f6f7;
+  --text: #1a1a1c;
+  --muted: #6b6b72;
+  --line: #e6e7e9;
+  --accent: #5088bd;
+  --code: #f1f2f4;
+  --code-inline: #f1f2f4;
+  --hover: #eceef0;
+  --shadow: 0 12px 40px #00000014;
   --hl-keyword: #9a3fb0;
   --hl-string: #2f9275;
   --hl-number: #c8681a;
@@ -25,15 +26,16 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  /* Deep faded plum, lava violet + pink + orange as the accents. */
-  --bg: #1a1521;
-  --panel: #221b2a;
-  --text: #e7e0ec;
-  --muted: #9a8fa6;
-  --line: #362c41;
-  --accent: #b88cf0;
-  --code: #251d2e;
-  --hover: #30263a;
+  /* Neutral near-black with a single blue accent. */
+  --bg: #17181a;
+  --panel: #202225;
+  --text: #e6e6e8;
+  --muted: #9a9aa2;
+  --line: #303236;
+  --accent: #5a9fd6;
+  --code: #1e2023;
+  --code-inline: #26282c;
+  --hover: #26282c;
   --hl-keyword: #e39ad9;
   --hl-string: #9fd3b0;
   --hl-number: #f2b27a;
@@ -45,15 +47,16 @@
 @media (prefers-color-scheme: dark) {
   :root[data-theme="system"] {
     color-scheme: dark;
-    /* Deep faded plum, lava violet + pink + orange as the accents. */
-    --bg: #1a1521;
-    --panel: #221b2a;
-    --text: #e7e0ec;
-    --muted: #9a8fa6;
-    --line: #362c41;
-    --accent: #b88cf0;
-    --code: #251d2e;
-    --hover: #30263a;
+    /* Neutral near-black with a single blue accent. */
+    --bg: #17181a;
+    --panel: #202225;
+    --text: #e6e6e8;
+    --muted: #9a9aa2;
+    --line: #303236;
+    --accent: #5a9fd6;
+    --code: #1e2023;
+    --code-inline: #26282c;
+    --hover: #26282c;
     --hl-keyword: #e39ad9;
     --hl-string: #9fd3b0;
     --hl-number: #f2b27a;
@@ -109,7 +112,7 @@ button svg {
   flex-shrink: 0;
 }
 ::selection {
-  background: #b663ed4d;
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
 }
 .app {
   height: 100%;
@@ -447,8 +450,9 @@ button svg {
 .prose code {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.83em;
-  background: var(--code);
-  padding: 0.16em 0.36em;
+  background: var(--code-inline);
+  border: 1px solid var(--line);
+  padding: 0.12em 0.35em;
   border-radius: 4px;
 }
 .prose pre {
@@ -465,6 +469,7 @@ button svg {
 .prose pre code {
   padding: 0;
   background: none;
+  border: 0;
   border-radius: 0;
   font-size: 0.8em;
 }
@@ -653,6 +658,14 @@ button svg {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+.cm-host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.cm-host .cm-editor {
+  height: 100%;
 }
 .editor-heading {
   display: flex;

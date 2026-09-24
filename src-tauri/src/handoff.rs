@@ -58,11 +58,23 @@ pub fn claude_url(workspace: &str, prompt: &str) -> (String, bool) {
     (url.into(), true)
 }
 
+// Supacode's deeplink can only open a repository by path; it has no entry point
+// for a prompt (confirmed with its author — "only the general CLI"). The prompt
+// therefore always travels on the clipboard, and the caller pastes it.
+pub fn supacode_url(workspace: &str) -> String {
+    let mut url = url::Url::parse("supacode://repo/open").unwrap();
+    url.query_pairs_mut().append_pair("path", workspace);
+    url.into()
+}
+
 #[tauri::command]
 pub async fn handoff_context(app: tauri::AppHandle, id: u64) -> Result<Context, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let doc = app.state::<Reader>().get(id)?;
-        Ok(context(&doc, app.state::<Inbox>().root()))
+        Ok(context(
+            &doc,
+            app.state::<Inbox>().root_for(Path::new(&doc.info.path)),
+        ))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -110,6 +122,28 @@ pub fn open_claude(
         )
     })?;
     Ok(included)
+}
+
+#[tauri::command]
+pub fn open_supacode(
+    app: tauri::AppHandle,
+    id: u64,
+    workspace: String,
+    prompt: String,
+) -> Result<bool, String> {
+    let doc = app.state::<Reader>().get(id)?;
+    if !Path::new(&workspace).is_absolute() || !Path::new(&doc.info.path).starts_with(&workspace) {
+        return Err("The handoff workspace no longer contains this document.".into());
+    }
+    if prompt.len() > 100_000 {
+        return Err("This handoff is too long. Use Copy for agent.".into());
+    }
+    let url = supacode_url(&workspace);
+    app.opener().open_url(url, None::<&str>).map_err(|e| {
+        format!("Could not open Supacode. Your context is copied; paste it into a session. {e}")
+    })?;
+    // Supacode cannot accept the prompt through the link — it is always copied.
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -161,5 +195,18 @@ mod tests {
         let (value, included) = claude_url("/project", &"x".repeat(14_001));
         assert!(!included);
         assert!(!value.contains("q="));
+    }
+    #[test]
+    fn supacode_url_opens_repo_and_never_carries_a_prompt() {
+        let url = supacode_url("/project/a & b");
+        let parsed = url::Url::parse(&url).unwrap();
+        assert_eq!(parsed.scheme(), "supacode");
+        assert_eq!(parsed.host_str(), Some("repo"));
+        assert_eq!(parsed.path(), "/open");
+        let pairs: std::collections::HashMap<_, _> = parsed.query_pairs().collect();
+        assert_eq!(pairs["path"], "/project/a & b");
+        // Supacode has no prompt entry point — the link must never leak one.
+        assert!(!url.contains("prompt="));
+        assert!(!url.contains("q="));
     }
 }
