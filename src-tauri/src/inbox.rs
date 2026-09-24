@@ -625,7 +625,7 @@ mod tests {
     /// deterministic instead of depending on how fast the test wrote two files.
     fn write_with_mtime(path: &Path, text: &str, secs: u64) {
         fs::write(path, text).unwrap();
-        fs::File::open(path)
+        fs::File::options().write(true).open(path)
             .unwrap()
             .set_times(fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(secs)))
             .unwrap();

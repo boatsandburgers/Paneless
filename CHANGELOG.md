@@ -32,6 +32,14 @@ Closing the window did nothing at all, with or without unsaved changes. `onClose
 
 `npm run test:acl` compares the capability files against the plugin commands the frontend can reach, deriving both sides from the installed packages. Nothing at build time reads those files, so a wrong list passes tsc, cargo and every unit test and fails only when a person uses the feature — which is how both permission defects above were found. The header states what the static scan cannot see.
 
+### The Windows test run passes
+
+Two unit-test helpers opened a file with `File::open` and then called `set_times` on it. `SetFileTime`
+requires a handle carrying `FILE_WRITE_ATTRIBUTES` ([Microsoft's own wording](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfiletime)),
+which a read-only open does not have, so both tests failed on Windows with "Access is denied"
+(os error 5) while passing everywhere else. Opening for write carries the right and changes nothing
+on Unix. One of the two helpers is in `project.rs`, which this fork otherwise does not touch.
+
 ### Editor and appearance
 
 The source editor is CodeMirror 6 with Markdown highlighting, line numbers and wrapping, themed from the reader's own tokens. The native window title bar follows the theme, which it did not before, leaving dark title text on a dark bar. Inline code has a border and its own fill, having been nearly invisible against the dark page background. The two inbox footer actions are one style instead of one button that looked like text. The accent is blue and the surfaces are neutral; the app icon is the fork's.

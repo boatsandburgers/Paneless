@@ -473,7 +473,7 @@ mod tests {
         let stamp = fs::metadata(&path).unwrap().modified().unwrap();
         let mut project = Project::open(root.path(), storage.path()).unwrap();
         fs::write(&path, "# After!").unwrap();
-        fs::File::open(&path)
+        fs::File::options().write(true).open(&path)
             .unwrap()
             .set_times(fs::FileTimes::new().set_modified(stamp))
             .unwrap();
