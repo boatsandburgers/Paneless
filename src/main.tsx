@@ -17,9 +17,40 @@ import {
 import "./style.css";
 import LargeReader from "./LargeReader";
 import Outline from "./Outline";
+import SourceEditor, { type EditorApi } from "./SourceEditor";
 import { captureHandoff, type Handoff } from "./handoff";
 const AgentHandoff = lazy(() => import("./AgentHandoff"));
 const ProjectInbox = lazy(() => import("./ProjectInbox"));
+// The inbox folder list is persisted by ProjectInbox, which is lazy-loaded and may never have
+// mounted in this session — so read the same stored list rather than plumbing state out of it.
+function firstInboxFolder(): string {
+  try {
+    const roots: unknown = JSON.parse(
+      localStorage.getItem("paneless-folders") || "[]",
+    );
+    const hidden: unknown = JSON.parse(
+      localStorage.getItem("paneless-hidden") || "[]",
+    );
+    if (!Array.isArray(roots)) return "";
+    const off = new Set(Array.isArray(hidden) ? hidden : []);
+    return roots.find((r) => typeof r === "string" && !off.has(r)) || "";
+  } catch {
+    return "";
+  }
+}
+// Path helpers that stay neutral about the separator: the app also targets Windows, and a path
+// coming back from the OS uses that platform's separator.
+function parentDirectory(path: string): string {
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return cut > 0 ? path.slice(0, cut) : "";
+}
+function joinPath(dir: string, name: string): string {
+  if (!dir) return name;
+  const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+  return dir.endsWith("/") || dir.endsWith("\\")
+    ? `${dir}${name}`
+    : `${dir}${sep}${name}`;
+}
 type Settings = {
   theme: "light" | "dark" | "system";
   font: number;
@@ -40,13 +71,19 @@ function initialSettings(): Settings {
 function Icon({
   name,
 }: {
-  name: "open" | "outline" | "inbox" | "type" | "source" | "read";
+  name: "open" | "new" | "outline" | "inbox" | "type" | "source" | "read";
 }) {
   const paths = {
     open: (
       <>
         <path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9v11H3Z" />
         <path d="M3 9h17" />
+      </>
+    ),
+    new: (
+      <>
+        <path d="M6 3h8l5 5v13H6Z" />
+        <path d="M14 3v5h5M12 12v6m-3-3h6" />
       </>
     ),
     inbox: (
@@ -116,6 +153,15 @@ export default function App() {
   const [doc, setDoc] = useState<OpenResult | null>(null);
   const docRef = useRef(doc);
   docRef.current = doc;
+  // A new document exists only as an editor buffer until the first save: there is no file, no
+  // id, and nothing to watch. `untitled` is that state; everything keyed on `doc` stays off.
+  const [untitled, setUntitled] = useState(false);
+  // Remounting the editor loses the cursor and the undo history, so its key changes only when a
+  // DIFFERENT buffer is loaded — never when an untitled buffer becomes a saved file.
+  const [editorKey, setEditorKey] = useState("empty");
+  // Where the save panel should open: the folder of the document that was open when New was
+  // pressed, captured because that document is cleared immediately afterwards.
+  const newFileDir = useRef("");
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const handoffRef = useRef(handoff);
   handoffRef.current = handoff;
@@ -139,10 +185,11 @@ export default function App() {
   const [source, setSource] = useState("");
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
-  const editRef = useRef<HTMLTextAreaElement>(null);
+  const editorApi = useRef<EditorApi | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(busy);
   busyRef.current = busy;
+  const savingRef = useRef(false);
   const history = useRef<{ paths: string[]; index: number }>({
     paths: [],
     index: -1,
@@ -170,14 +217,25 @@ export default function App() {
     (e: unknown) => setError(String(e).replace(/^Error: /, "")),
     [],
   );
-  const confirmDiscard = async () =>
-    !dirtyRef.current ||
-    (native
-      ? (await import("@tauri-apps/plugin-dialog")).confirm(
-          "Discard your unsaved changes?",
-          { title: "Unsaved changes", kind: "warning" },
-        )
-      : window.confirm("Discard your unsaved changes?"));
+  // Keeping the work is the safe answer, so a dialog that cannot be shown must NOT be read as
+  // "discard" — but it must also not be silent. Without the report, a failure here looks like a
+  // dead window-close button: the close is cancelled and nothing explains why.
+  const confirmDiscard = async () => {
+    if (!dirtyRef.current) return true;
+    try {
+      return native
+        ? await (
+            await import("@tauri-apps/plugin-dialog")
+          ).confirm("Discard your unsaved changes?", {
+            title: "Unsaved changes",
+            kind: "warning",
+          })
+        : window.confirm("Discard your unsaved changes?");
+    } catch (e) {
+      report(e);
+      return false;
+    }
+  };
   const openPath = useCallback(
     async (
       path: string,
@@ -203,6 +261,7 @@ export default function App() {
         setDirty(false);
         setChanged(false);
         setEditing(false);
+        setUntitled(false);
         setLoaded(false);
         setMetrics(undefined);
         pendingPosition.current = {
@@ -265,19 +324,122 @@ export default function App() {
       report(e);
     }
   };
+  // New file, the way every Mac editor does it: an empty buffer now, the question of where it
+  // lives deferred to the first save.
+  const newFile = async () => {
+    if (!(await confirmDiscard())) return;
+    newFileDir.current = parentDirectory(docRef.current?.info.path || "");
+    // Supersede any open or edit-toggle still in flight: without this, a file that finishes
+    // opening a moment later replaces the new buffer and discards what was typed into it, with
+    // no discard prompt. The superseded call abandons `busy`, so this takes it over.
+    generation.current += 1;
+    setBusy(false);
+    // Back from an untitled buffer must return to the document it was started from — the
+    // CURRENT entry, not the last one in the list. Drop the forward branch first (the same thing
+    // openPath does when a new document is pushed), then sit one past what is left.
+    history.current.paths = history.current.paths.slice(
+      0,
+      history.current.index + 1,
+    );
+    history.current.index = history.current.paths.length;
+    savedScroll.current = 0;
+    setError("");
+    setChanged(false);
+    setOutline(false);
+    setInbox(false);
+    setDoc(null);
+    setSource("");
+    setEditorKey(`untitled-${Date.now()}`);
+    setUntitled(true);
+    setEditing(true);
+    dirtyRef.current = false;
+    setDirty(false);
+    if (native)
+      void (async () =>
+        (await import("@tauri-apps/api/window"))
+          .getCurrentWindow()
+          .setTitle("Untitled — Paneless"))().catch(report);
+    document.title = "Untitled — Paneless";
+  };
+  // The panel opens where the note most likely belongs: beside the document that was open, else
+  // the first enabled inbox folder, else wherever the OS puts it.
+  const chooseNewPath = async (): Promise<string> => {
+    const suggested = joinPath(
+      newFileDir.current || firstInboxFolder(),
+      "Untitled.md",
+    );
+    if (!native)
+      return (
+        window.prompt(
+          "Development preview: absolute path for the new file",
+          suggested,
+        ) || ""
+      );
+    const path = await (
+      await import("@tauri-apps/plugin-dialog")
+    ).save({
+      defaultPath: suggested,
+      filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
+    });
+    return path || "";
+  };
+  // A created file is an ordinary document from here on, so it joins the history and the window
+  // title exactly like an opened one.
+  const adoptDocument = async (result: OpenResult) => {
+    history.current.paths = history.current.paths.slice(
+      0,
+      history.current.index + 1,
+    );
+    history.current.paths.push(result.info.path);
+    history.current.index = history.current.paths.length - 1;
+    setDoc(result);
+    if (native)
+      await (
+        await import("@tauri-apps/api/window")
+      )
+        .getCurrentWindow()
+        .setTitle(`${result.info.name} — Paneless`);
+    document.title = `${result.info.name} — Paneless`;
+  };
   const save = async () => {
-    if (!doc || !editing || !dirtyRef.current) return;
+    // savingRef is a SYNCHRONOUS re-entrancy lock: a second Cmd-S (the CodeMirror
+    // keybinding fires save(), and the keydown still bubbles to the window handler)
+    // and any save while one is already in flight are no-ops — no double or racing writes.
+    if (!editing || !editorApi.current || savingRef.current) return;
+    // An untitled buffer may be saved even when nothing was typed — an empty file is a
+    // legitimate thing to create. A saved document still needs real changes.
+    if (!untitled && (!doc || !dirtyRef.current)) return;
+    const existing = untitled ? null : doc;
+    const api = editorApi.current;
+    const text = api.getValue();
+    savingRef.current = true;
     setBusy(true);
     try {
-      const text = editRef.current!.value;
-      await command("save_document", { id: doc.info.id, source: text });
+      if (existing) {
+        await command("save_document", { id: existing.info.id, source: text });
+      } else {
+        // Cancelling the panel must leave the buffer and its dirty flag exactly as they were.
+        const path = await chooseNewPath();
+        if (!path) return;
+        const result = await command<OpenResult>("create_document", {
+          path,
+          source: text,
+        });
+        setUntitled(false);
+        await adoptDocument(result);
+      }
       setSource(text);
-      dirtyRef.current = false;
-      setDirty(false);
-      setChanged(false);
+      // Clear dirty ONLY if nothing was typed during the await; otherwise those
+      // mid-save keystrokes would be marked saved and then silently discarded.
+      if (api.getValue() === text) {
+        dirtyRef.current = false;
+        setDirty(false);
+        setChanged(false);
+      }
     } catch (e) {
       report(e);
     } finally {
+      savingRef.current = false;
       setBusy(false);
     }
   };
@@ -290,10 +452,14 @@ export default function App() {
       requestAnimationFrame(() => scrollRef.current?.scrollTo(0, position));
     } else {
       try {
+        const attempt = generation.current;
         savedScroll.current = scrollRef.current?.scrollTop || 0;
-        setSource(
-          await command<string>("document_source", { id: doc.info.id }),
-        );
+        const text = await command<string>("document_source", {
+          id: doc.info.id,
+        });
+        if (attempt !== generation.current) return;
+        setSource(text);
+        setEditorKey(String(doc.info.id));
         setEditing(true);
       } catch (e) {
         report(e);
@@ -321,6 +487,17 @@ export default function App() {
   };
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
+    // Keep the native window chrome (title text, traffic lights) in step with
+    // the reader theme. Without this the web content goes dark while macOS still
+    // draws the title bar in the light appearance — dark text on a dark bar.
+    if (native)
+      void import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
+        getCurrentWindow()
+          .setTheme(settings.theme === "system" ? null : settings.theme)
+          .catch(() => {
+            /* setTheme is best-effort chrome polish; never block reading */
+          }),
+      );
     try {
       localStorage.setItem("paneless-settings", JSON.stringify(settings));
     } catch {
@@ -404,7 +581,9 @@ export default function App() {
         setFind(false);
       }
       if (!e.metaKey && !e.ctrlKey) return;
-      if (["o", "s", "+", "=", "-", "0", "f"].includes(e.key.toLowerCase()))
+      if (
+        ["n", "o", "s", "+", "=", "-", "0", "f"].includes(e.key.toLowerCase())
+      )
         e.preventDefault();
       switch (e.key.toLowerCase()) {
         case "a":
@@ -420,6 +599,9 @@ export default function App() {
         case "]":
           e.preventDefault();
           navigateHistory(1);
+          break;
+        case "n":
+          void newFile();
           break;
         case "o":
           if (e.shiftKey) showInbox();
@@ -549,6 +731,14 @@ export default function App() {
           )}
           <button
             className="icon-button"
+            title={`New file (${modifier}N)`}
+            aria-label="New file"
+            onClick={() => void newFile()}
+          >
+            <Icon name="new" />
+          </button>
+          <button
+            className="icon-button"
             title={`Open file (${modifier}O)`}
             aria-label="Open file"
             onClick={() => void pick()}
@@ -581,9 +771,9 @@ export default function App() {
           )}
         </div>
         <div className="file-title">
-          {doc ? (
+          {doc || untitled ? (
             <>
-              {doc.info.name}
+              {doc ? doc.info.name : "Untitled"}
               <span className="dirty-dot">{dirty ? " •" : ""}</span>
             </>
           ) : (
@@ -776,7 +966,7 @@ export default function App() {
           </Suspense>
         )}
         <main className="reading-scroll" ref={scrollRef}>
-          {!doc ? (
+          {!doc && !untitled ? (
             <div className="empty-state">
               <div className="page-symbol">
                 <svg
@@ -809,36 +999,40 @@ export default function App() {
                 <Icon name="open" />
                 Open File<span>{modifier}O</span>
               </button>
+              <button
+                className="project-empty-action"
+                onClick={() => void newFile()}
+              >
+                Start a new note →
+              </button>
               <button className="project-empty-action" onClick={showInbox}>
                 Browse a project’s Markdown →
               </button>
               <p className="file-types">.md &nbsp; / &nbsp; .markdown</p>
             </div>
-          ) : editing ? (
+          ) : editing || untitled ? (
             <div className="editor-wrap">
               <div className="editor-heading">
                 <span>MARKDOWN SOURCE</span>
-                <button disabled={!dirty || busy} onClick={() => void save()}>
+                <button
+                  disabled={(!dirty && !untitled) || busy}
+                  onClick={() => void save()}
+                >
                   Save <kbd>{modifier}S</kbd>
                 </button>
               </div>
-              <textarea
-                ref={editRef}
-                key={doc.info.id}
-                defaultValue={source}
-                aria-label="Markdown source"
-                className="source-editor"
-                readOnly={busy}
-                spellCheck={false}
-                autoCapitalize="off"
-                autoCorrect="off"
-                onChange={() => {
+              <SourceEditor
+                key={editorKey}
+                initialDoc={source}
+                apiRef={editorApi}
+                onSave={() => void save()}
+                onDirty={() => {
                   dirtyRef.current = true;
                   setDirty(true);
                 }}
               />
             </div>
-          ) : (
+          ) : doc ? (
             <Suspense
               fallback={<p className="loading-document">Preparing document…</p>}
             >
@@ -876,7 +1070,7 @@ export default function App() {
                 onLink={(url) => void openLink(url)}
               />
             </Suspense>
-          )}
+          ) : null}
         </main>
       </div>
       <footer className="statusbar">
@@ -885,7 +1079,9 @@ export default function App() {
             ? "Opening…"
             : doc
               ? `${(doc.info.bytes / 1024).toLocaleString(undefined, { maximumFractionDigits: 0 })} KB`
-              : "Markdown, beautifully at ease."}
+              : untitled
+                ? "Not saved yet"
+                : "Markdown, beautifully at ease."}
         </span>
         <span>
           {doc
@@ -898,7 +1094,9 @@ export default function App() {
                   ? "Large document · Sections load as you read"
                   : "Markdown"
                 : "Rendering…"
-            : "LOCAL FILES. QUIET MIND."}
+            : untitled
+              ? `New file · ${modifier}S to save`
+              : "LOCAL FILES. QUIET MIND."}
         </span>
         {import.meta.env.DEV && metrics && (
           <span

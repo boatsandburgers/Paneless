@@ -40,8 +40,9 @@ export RUSTUP_HOME=/tmp/paneless-rustup
 - Open `.md` and `.markdown` files using the native picker, OS file associations, or drag/drop. Files must be UTF-8; empty documents are supported.
 - The outline button shows headings, with a filter and bounded row rendering for thousands of entries. It starts hidden.
 - **Aa** controls light, dark, or system appearance, font size, and reading width. Preferences persist locally; native window size and position are restored by Tauri's window-state plugin.
-- The source button opens a plain, monospaced textarea. Save before returning to reading; unsaved changes require confirmation before replacement or close/quit.
-- File watching uses OS notifications on the containing directory, including atomic replacements. External changes refresh automatically while actively reading in the foreground, retaining your scroll offset. Background updates remain unacknowledged and show a Reload notice. While editing or selecting text, a **Reload** notice lets you keep your work before reloading. Saving checks the original disk fingerprint and refuses to overwrite external edits. Writes use a temporary sibling file and atomic replacement while preserving permissions.
+- The source button opens a CodeMirror editor with Markdown highlighting, line numbers and wrapping, themed from the same tokens as the reader. Save before returning to reading; unsaved changes require confirmation before replacement or close/quit.
+- Cmd/Ctrl+N starts a new document. It is an editor buffer with no file behind it — the title reads Untitled and nothing is written until the first save, which asks where the file goes through the native panel, starting in the folder of the document that was open. An existing file is never overwritten, even if the panel has already asked about replacing it; the creation fails and says so. Once saved it is an ordinary document, and the editor is not remounted, so the cursor and the undo history survive.
+- File watching uses OS notifications on the containing directory, including atomic replacements. External changes refresh automatically while actively reading in the foreground, retaining your scroll offset. Background updates remain unacknowledged and show a Reload notice. While editing or selecting text, a **Reload** notice lets you keep your work before reloading. Saving checks the original disk fingerprint and refuses to overwrite external edits. Writes use a temporary sibling file and atomic replacement while preserving permissions. On a network share the flush falls back from `F_FULLFSYNC`, which SMB rejects with ENOTSUP, to a plain `fsync`, and the permission copy is best-effort for the same reason; the atomic rename, not the flush, is what stops a reader seeing half a file.
 
 | Shortcut | Action |
 | --- | --- |
@@ -49,6 +50,7 @@ export RUSTUP_HOME=/tmp/paneless-rustup
 | Cmd/Ctrl++ / − | Increase / decrease type size |
 | Cmd/Ctrl+0 | Reset type size |
 | Cmd/Ctrl+F | Find in document |
+| Cmd/Ctrl+N | New document |
 | Cmd/Ctrl+S | Save source |
 | Cmd/Ctrl+Shift+A | Ask an agent about the document or selection |
 | Escape | Close appearance, find, or agent handoff |
@@ -116,7 +118,7 @@ Automated checks cover TS/build, Rust URL/HTML/resource confinement and save con
 
 ## Project inbox (0.2)
 
-Open **Project inbox** in the toolbar (⌘⇧O / Ctrl+Shift+O), then choose a project folder. The optional sidebar provides Recent, Unread, Updated, and Pinned views; title/preview/path search; folder filters; keyboard navigation; and Mark all read. Arrow keys move between document buttons; Enter opens one. At narrow widths, the inbox overlays the page and closes after opening a document.
+Open **Project inbox** in the toolbar (⌘⇧O / Ctrl+Shift+O), then choose a project folder — or several. Each folder becomes a chip you can switch off to hide its documents and back on to bring them in, and the enabled set is shown as one merged list, so Recent, Unread and Updated count across all of them. Which folders you added, and which are switched off, survive a restart. Read state is tracked per folder and independently, so closing one and reopening it later keeps its history, and a folder on a server that is unreachable stays in the list as an offline chip and returns with its history intact on the next Refresh. A folder is scanned under its own lock, so one unreachable network folder cannot freeze the others or the window. The optional sidebar provides Recent, Unread, Updated, and Pinned views; title/preview/path search; folder filters; keyboard navigation; and Mark all read. Arrow keys move between document buttons; Enter opens one. At narrow widths, the inbox overlays the page and closes after opening a document.
 
 The first scan establishes a read baseline. Subsequently discovered paths appear as Unread; a previously read file appears as Updated when its content differs from the revision last opened. Rewriting identical content or changing timestamps does not create a new update. Pins and reading history persist locally in the OS application-data directory (`app.paneless.reader/projects`), not in the repository. Reopening a previously indexed project retains this history. The last project is reopened when you first open the inbox after launching Paneless; standalone-file startup does not start indexing.
 
@@ -141,6 +143,7 @@ Select a passage and click **Ask agent** (⌘⇧A / Ctrl+Shift+A), or open it wi
 - **Copy for agent:** paste the instruction and context into any agent conversation.
 - **Open in Codex:** opens the installed app with a draft and the local workspace. Context is also copied. Long prompts use a workspace-only link; paste into the new composer when prompted. Nothing is submitted automatically.
 - **Open in Claude Code:** opens the Claude desktop app's Code tab on the workspace through its `claude://code/new` link, with the prompt pre-filled and not sent. The app treats a folder from a link as untrusted and asks you to confirm it. Context is also copied. Prompts over about 14,000 characters open the workspace only; paste the copied context. Needs the Claude desktop app installed.
+- **Open in Supacode:** opens the workspace through `supacode://repo/open`. Supacode's deeplink and CLI have no prompt entry point, so unlike the two routes above the instruction cannot be pre-filled: it is placed on the clipboard and you paste it into a session with Cmd/Ctrl+V. If Supacode ever exposes a prompt parameter, the button becomes the same two-line shape as the others.
 
 The handoff includes the absolute file path, the selection's starting section/anchor when available, rendered text, and the rendered content fingerprint (not a Git commit). The selected project is used when it contains the file; otherwise Paneless finds the nearest Git root, including worktrees, or uses the document folder. Expand **Review included context** to inspect the complete payload and workspace before handing it off. A section is the selection's starting section; a quotation can span multiple sections. Selections above 12,000 Unicode characters are explicitly shortened; whole-file contents are not copied automatically.
 
@@ -148,4 +151,17 @@ The reader pauses automatic refresh while the handoff is open. Disk content is c
 
 The composer and its styles load on demand. Paneless uses Tauri's official clipboard plugin with write-text permission only, and has no embedded model, AI credentials, or background agent processes. Quoted Markdown is reference data, kept separate from your instruction. Generic Markdown links cannot launch an agent. Provider routes follow the [official Codex deep-link reference](https://learn.chatgpt.com/docs/reference/commands#deep-links) and the [Claude desktop deep-link reference](https://support.claude.com/en/articles/14729294-open-claude-desktop-with-a-link).
 
+`npm run test:acl` compares `src-tauri/capabilities/` against the plugin commands the frontend can actually reach, reading both sides from the installed packages rather than assuming a function is named after the command it sends. It needs no app, no dev server and no network. Two defects shipped here before it existed, each found by using the app: a missing `dialog:allow-save`, and a window-close button that did nothing because `core:window:allow-destroy` was absent — `onCloseRequested` calls `destroy()` itself when the handler does not prevent the default.
+
 With the development server and Rust adapter running, `npm run test:handoff` verifies selection/heading capture, clipboard payloads, changed-file snapshots, provider failures, modal behavior, narrow layouts, in Chromium and WebKit. Provider launches are mocked; the tests do not submit prompts to agents. Rust tests cover workspace detection, content changes, URL encoding, and the long-prompt fallback.
+
+## Known limitations
+
+Find-in-document searches only what the engine has laid out. Sections carry `content-visibility: auto` so that off-screen content is not laid out, and WebKit does not make skipped content findable ([WebKit bug 283846](https://bugs.webkit.org/show_bug.cgi?id=283846)), so in a document under 2 MiB a match far below the viewport is missed. Above 2 MiB the search runs in Rust over the whole file and is unaffected, which is the wrong way round and is being worked on.
+
+A folder on a network share updates on Refresh only. macOS file watching uses FSEvents, which delivers no events for SMB or NFS volumes. Local folders update as files change. A Refresh against a mount that has hung still waits for the OS timeout, but it holds only that folder's own lock, so the rest of the window stays responsive.
+
+A new document exists only in memory until the first save. Closing or quitting asks first, so it cannot be lost by accident, but a crash loses it — there is no draft recovery of the kind TextEdit has.
+
+Windows compilation and Explorer integration are implemented and configured in CI, but have never been compiled or run on Windows by this fork.
+
