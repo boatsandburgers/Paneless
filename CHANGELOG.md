@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased — changes from the PEOPS fork, 25 September – 5 November 2026
+
+Written against the first part of this pull request (29e2513). Built and run on macOS / Apple Silicon.
+
+### Find counts its matches
+
+Cmd/Ctrl+F used to say "Found" or nothing. The field now shows a count, the way Google Docs does: "12 matches" while you type, "3 of 12" once you jump, "0 of 0" when the word is not there. Typing only counts. The page moves on Enter, Next or Previous.
+
+The reader, the source editor and documents over 2 MiB now share one matcher in `src/findText.ts`, and the Rust count in `search_document` folds text the same way. So the number in the field is always the number of places Enter visits. It ignores case and nothing else. A word split by bold or a link counts once, and image alt text does not count, because neither is how the page reads.
+
+This replaced `window.find`. In the reader it matched the query inside the find box itself, so Enter stopped on the box and never reached the page. The jump now paints a CSS highlight and leaves the keyboard in the box.
+
+### Large documents keep the found word in place
+
+Four defects in `LargeReader.tsx`, each reproduced with a chunk fetch delayed by 300 ms:
+
+- a neighbour section that mounted late pushed the found word off screen;
+- quick steps whose sections arrived out of order marked the last one to arrive, so the mark and the counter disagreed;
+- a section kept for a match, or fetched off screen, was never evicted afterwards;
+- a short section came back from eviction taller than it was, and at the end of a document the word moved.
+
+Evicted sections now keep their real height. A section that renders as nothing (raw HTML only) is no longer evicted, because each visit fetched it again.
+
+### Open in Claude Code goes to the session already working on the folder
+
+When a Claude desktop session is open on the document's folder, the button switches to it instead of starting a new one, and the dialog names the session. Running sessions come from `~/.claude/sessions/`. The `claude://code/continue` link takes no prompt, so the context goes on the clipboard and nothing is sent. With no such session it opens a new one as before.
+
+The Supacode button and its link code are gone. Say if you still use it and it comes back.
+
+### The editor
+
+Selected text in the source editor was nearly invisible: a pale tint under pale syntax colours. Every syntax colour on the selection now meets WCAG AA (4.5:1) in both themes. The editor also has its accessible name, "Markdown source", again. The plain textarea had it, and CodeMirror dropped it in the first part of this pull request.
+
+### Tests
+
+`npm run test:find` is new and covers the counter in all three modes and the large-document cases above. The other suites had drifted from the app. `test-inbox` looked for labels that had been renamed, and the development adapter in `bench-server.rs` did not know the multi-folder commands. `test-handoff` waited for a status text the app has never shown. `test-ui` now replaces text with real keystrokes: Playwright's `fill` races CodeMirror in WebKit and about 1 run in 100 saved a leading blank line, which typing never did in about 1,770 runs.
+
 ## Unreleased — changes from the PEOPS fork, 9–24 September 2026
 
 Written against 9065bb2. Everything below was built and run on macOS / Apple Silicon.

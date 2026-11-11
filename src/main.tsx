@@ -19,6 +19,14 @@ import LargeReader from "./LargeReader";
 import Outline from "./Outline";
 import SourceEditor, { type EditorApi } from "./SourceEditor";
 import { captureHandoff, type Handoff } from "./handoff";
+import {
+  clearMatch,
+  countLabel,
+  findMatches,
+  indexText,
+  matchGeneration,
+  showMatch,
+} from "./findText";
 const AgentHandoff = lazy(() => import("./AgentHandoff"));
 const ProjectInbox = lazy(() => import("./ProjectInbox"));
 // The inbox folder list is persisted by ProjectInbox, which is lazy-loaded and may never have
@@ -208,6 +216,10 @@ export default function App() {
   const [find, setFind] = useState(false);
   const [search, setSearch] = useState("");
   const [findMessage, setFindMessage] = useState("");
+  const findInput = useRef<HTMLInputElement>(null);
+  // Set by the Edit / Read toggle when the find bar is open: the focus then stays in its box.
+  // A new note, or a document opened from a link, takes the focus as before.
+  const findKeepsFocus = useRef(false);
   const openedAt = useRef(0);
   const generation = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -327,6 +339,7 @@ export default function App() {
   // New file, the way every Mac editor does it: an empty buffer now, the question of where it
   // lives deferred to the first save.
   const newFile = async () => {
+    findKeepsFocus.current = false;
     if (!(await confirmDiscard())) return;
     newFileDir.current = parentDirectory(docRef.current?.info.path || "");
     // Supersede any open or edit-toggle still in flight: without this, a file that finishes
@@ -445,6 +458,7 @@ export default function App() {
   };
   const toggleEdit = async () => {
     if (!doc) return;
+    findKeepsFocus.current = find;
     if (editing) {
       if (!(await confirmDiscard())) return;
       const position = savedScroll.current;
@@ -638,57 +652,145 @@ export default function App() {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, []);
-  const hitsRef = useRef<{
-    query: string;
-    id: number;
-    hits: number[];
-    index: number;
-  }>({ query: "", id: 0, hits: [], index: -1 });
+  // What the find box counts. `key` says which query, document and mode the list
+  // belongs to; `current` is the match last jumped to, -1 before the first jump.
+  const findRef = useRef<{
+    key: string;
+    total: number;
+    current: number;
+    hits: [number, number][];
+  }>({ key: "", total: 0, current: -1, hits: [] });
+  // In the source the text changes while writing, so its revision is part of the key: the count
+  // follows the edits instead of standing until the next Enter.
+  const [editorRevision, setEditorRevision] = useState(0);
+  const findKey = () =>
+    `${doc?.info.id}|${editing ? `edit ${editorRevision}` : "read"}|${search}`;
+  // The reading pane's own text, never the find box that also holds the query.
+  const readingText = () => {
+    const root = scrollRef.current;
+    const prose = root?.querySelector(".prose");
+    return root && prose ? { root, prose, index: indexText(prose) } : null;
+  };
+  const countMatches = async () => {
+    if (!search.trim()) return { total: 0, hits: [] as [number, number][] };
+    // The editor first: a new note that is not saved yet has an editor and no document.
+    if (editorApi.current) return { total: editorApi.current.count(search), hits: [] };
+    if (!doc) return { total: 0, hits: [] };
+    if (doc.info.bytes > LARGE_DOCUMENT_BYTES) {
+      const hits = await command<[number, number][]>("search_document", {
+        id: doc.info.id,
+        query: search,
+      });
+      return { total: hits.reduce((n, [, count]) => n + count, 0), hits };
+    }
+    const reading = readingText();
+    return { total: reading ? findMatches(reading.index.text, search).length : 0, hits: [] };
+  };
+  // The count follows the query while typing; nothing moves until Enter, Next or Previous.
+  useEffect(() => {
+    // A new query, another document or a closed bar takes the old match's mark away.
+    clearMatch();
+    // Reopened, the bar counts again: the old "N of M" pointed at a mark that is gone.
+    if (!find) findRef.current = { key: "", total: 0, current: -1, hits: [] };
+    if (!find || (!loaded && !editing)) return;
+    const key = findKey();
+    const timer = setTimeout(() => {
+      countMatches()
+        .then(({ total, hits }) => {
+          // A jump made since the typing already counted, and knows which match is current.
+          if (key !== findKey() || findRef.current.key === key) return;
+          findRef.current = { key, total, current: -1, hits };
+          setFindMessage(search.trim() ? countLabel(total, -1) : "");
+        })
+        .catch(report);
+    }, 150);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [find, loaded, search, doc, editing, editorRevision]);
+  // Switching between reading and the source with the find bar open puts the focus back in its
+  // box, so the next Enter searches instead of typing into the document or a button.
+  useEffect(() => {
+    const keep = findKeepsFocus.current;
+    findKeepsFocus.current = false;
+    if (keep && find) requestAnimationFrame(() => findInput.current?.focus());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
+  // Steps over 2 MiB wait for the count from Rust, so they run one after another: two quick
+  // presses step twice instead of both landing on the first match.
+  const largeSteps = useRef(Promise.resolve());
   const searchDocument = async (backwards = false) => {
-    if (doc && doc.info.bytes > LARGE_DOCUMENT_BYTES) {
-      if (!search) return;
-      try {
-        let result = hitsRef.current;
-        if (result.query !== search || result.id !== doc.info.id)
-          result = {
-            query: search,
-            id: doc.info.id,
-            hits: await command<number[]>("search_document", {
-              id: doc.info.id,
-              query: search,
-            }),
-            index: -1,
-          };
-        if (!result.hits.length) {
-          setFindMessage("No match");
-          return;
-        }
-        result.index =
-          (result.index + (backwards ? -1 : 1) + result.hits.length) %
-          result.hits.length;
-        hitsRef.current = result;
-        window.dispatchEvent(
-          new CustomEvent("paneless:search", {
-            detail: { chunk: result.hits[result.index], query: search },
-          }),
-        );
-        setFindMessage(`${result.index + 1} / ${result.hits.length} sections`);
-      } catch (e) {
-        report(e);
-      }
+    // While the document is still rendering, the reading count is not final; the field says so.
+    // The editor has its whole text at once, and loaded stays false if it was opened mid-render.
+    if (!loaded && !editing) return;
+    const generation = matchGeneration();
+    if (!search.trim()) {
+      setFindMessage("");
       return;
     }
-    const fn = (
-      window as unknown as {
-        find?: (
-          text: string,
-          caseSensitive: boolean,
-          backwards: boolean,
-          wrap: boolean,
-        ) => boolean;
-      }
-    ).find;
-    setFindMessage(fn?.(search, false, backwards, true) ? "" : "No match");
+    const key = findKey();
+    // The source editor searches its own whole text and keeps the focus in the find box.
+    // It comes before the document check: a new unsaved note has no document.
+    if (editorApi.current) {
+      const { total, current } = editorApi.current.find(search, backwards);
+      findRef.current = { key, total, current, hits: [] };
+      setFindMessage(countLabel(total, current));
+      return;
+    }
+    if (!doc) {
+      setFindMessage("");
+      return;
+    }
+    const step = (state: typeof findRef.current) =>
+      state.current < 0
+        ? backwards
+          ? state.total - 1
+          : 0
+        : (state.current + (backwards ? -1 : 1) + state.total) % state.total;
+    if (doc.info.bytes > LARGE_DOCUMENT_BYTES) {
+      largeSteps.current = largeSteps.current.then(async () => {
+        try {
+          let state = findRef.current;
+          if (state.key !== key) state = { key, current: -1, ...(await countMatches()) };
+          // Typing, closing the bar or switching since this Enter: the step is void.
+          if (generation !== matchGeneration()) return;
+          if (!state.total) {
+            findRef.current = state;
+            setFindMessage(countLabel(0, -1));
+            return;
+          }
+          state.current = step(state);
+          findRef.current = state;
+          // The match's section, and which match inside it.
+          let nth = state.current;
+          const hit = state.hits.find(([, count]) => (nth -= count) < 0)!;
+          window.dispatchEvent(
+            new CustomEvent("paneless:search", {
+              detail: { chunk: hit[0], query: search, nth: nth + hit[1], generation },
+            }),
+          );
+          setFindMessage(countLabel(state.total, state.current));
+        } catch (e) {
+          report(e);
+        }
+      });
+      return;
+    }
+    const reading = readingText();
+    const matches = reading ? findMatches(reading.index.text, search) : [];
+    let state = findRef.current;
+    if (state.key !== key || state.total !== matches.length)
+      state = { key, total: matches.length, current: -1, hits: [] };
+    if (!reading || !matches.length) {
+      findRef.current = state;
+      setFindMessage(countLabel(0, -1));
+      return;
+    }
+    state.current = step(state);
+    findRef.current = state;
+    // The match itself goes to the middle of the pane, not its parent: a long paragraph
+    // centred as a whole leaves the word out of view.
+    showMatch(reading.root, reading.prose, matches[state.current]);
+    setFindMessage(countLabel(state.total, state.current));
   };
   const DocumentReader =
     doc && doc.info.bytes > LARGE_DOCUMENT_BYTES ? LargeReader : Reader;
@@ -913,14 +1015,20 @@ export default function App() {
             searchDocument();
           }}
         >
-          <input
-            autoFocus
-            aria-label="Find in document"
-            placeholder="Find in document…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <span>{!loaded ? "Still loading…" : findMessage}</span>
+          {/* The count sits inside the field, on the right, as in Google Docs. */}
+          <div className="find-field">
+            <input
+              autoFocus
+              ref={findInput}
+              aria-label="Find in document"
+              placeholder="Find in document…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <span className="find-count" aria-live="polite">
+              {!loaded && !editing ? "Still loading…" : findMessage}
+            </span>
+          </div>
           <button type="button" onClick={() => searchDocument(true)}>
             Previous
           </button>
@@ -1025,10 +1133,12 @@ export default function App() {
                 key={editorKey}
                 initialDoc={source}
                 apiRef={editorApi}
+                focusOnMount={!findKeepsFocus.current}
                 onSave={() => void save()}
                 onDirty={() => {
                   dirtyRef.current = true;
                   setDirty(true);
+                  setEditorRevision((r) => r + 1);
                 }}
               />
             </div>

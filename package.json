@@ -16,6 +16,7 @@
     "test:desktop": "node scripts/test-desktop-events.mjs",
     "test:inbox": "node scripts/test-inbox.mjs",
     "test:handoff": "node scripts/test-handoff.mjs",
+    "test:find": "node scripts/test-find.mjs",
     "test:acl": "node scripts/acl-selftest.mjs"
   },
   "dependencies": {

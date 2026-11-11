@@ -63,13 +63,17 @@ React manages the shell. `Reader.tsx` inserts native HTML sections in approximat
 
 A JavaScript parser such as Marked or markdown-it could also run in a worker, but would require moving the whole source across IPC, a worker protocol, and a sanitization pass or equivalently strict token filtering. Rust already owns file access, and pulldown-cmark provides a mature streaming event API without a persistent AST or React node tree. That makes it a compact architecture with directly measured read/parse timings. This is **not** a claim that Rust beats every JS parser: no controlled JS parser comparison was performed. The measured bottleneck was browser DOM/layout, not parsing. See [pulldown-cmark's API](https://docs.rs/pulldown-cmark/latest/pulldown_cmark/) and [Tauri's process model](https://v2.tauri.app/concept/process-model/).
 
+### Find in document
+
+Cmd/Ctrl+F shows the count inside the field: "12 matches" while you type, "3 of 12" after a jump, "0 of 0" when there is none. Nothing moves until Enter, Next or Previous. The reader, the source editor and documents over 2 MiB use one matcher, so the count is always the number of places Enter steps through. It ignores case and nothing else, and it skips image alt text, which is not on the page. The jump paints a CSS highlight and leaves the keyboard in the find box. The browser's own `window.find` is not used: it matched the query inside the find box itself, so Enter found nothing.
+
 ### Large documents
 
-Files up to 2 MiB retain the whole HTML document, with `content-visibility: auto` avoiding offscreen layout. Browser selection, copying, anchors, and find operate normally after insertion completes.
+Files up to 2 MiB retain the whole HTML document, with `content-visibility: auto` avoiding offscreen layout. Browser selection, copying and anchors operate normally after insertion completes.
 
 The initial 20 MiB stress fixture produced **1.57 million DOM elements**. Chunked insertion avoided a blank window, but WebKit still experienced multi-second stalls. This evidence justified `LargeReader.tsx`: above 2 MiB it keeps nearby sections mounted, remembers their heights, and retrieves other sections on demand. The final 20 MiB run held roughly **6,300–6,500 elements**, including lightweight placeholders. No long frame gaps were recorded during the measured load and theme change.
 
-Tradeoffs are explicit: large-file scrollbar geometry is estimated until sections are visited; browser Select All/copy and accessibility expose the mounted portion, not the entire document. Selection within visible sections is native. Use source mode to copy the full file. Cmd/Ctrl+F searches the **whole document in Rust** and navigates matching sections; repeated occurrences within one section are grouped as one result. Outline anchors can jump directly to unmounted headings. A single enormous block (for example a multi-megabyte unbroken table or paragraph) is not subdivided and can still be expensive. File input is capped at 100 MiB.
+Tradeoffs are explicit: large-file scrollbar geometry is estimated until sections are visited; browser Select All/copy and accessibility expose the mounted portion, not the entire document. Selection within visible sections is native. Use source mode to copy the full file. Cmd/Ctrl+F counts matches over the **whole document in Rust** and steps through every one of them, fetching each section as it is reached. Outline anchors can jump directly to unmounted headings. A single enormous block (for example a multi-megabyte unbroken table or paragraph) is not subdivided and can still be expensive. File input is capped at 100 MiB.
 
 ## Security
 
@@ -98,6 +102,7 @@ npm run dev
 npx playwright install chromium webkit
 npm run test:ui
 npm run test:desktop
+npm run test:find
 ```
 
 The generator creates approximately 100 KiB, 1 MiB, 5 MiB, and 20 MiB in `benchmarks/generated/` (ignored by Git), mixing paragraphs, heading hierarchies, nested/task lists, 36-row tables, quotations, links, inline formatting, and fenced code. The largest file has 6,018 sections and 12,037 headings. Tests use the **release Rust reader** through a development HTTP adapter and the same frontend in Playwright Chromium and WebKit. Measurements cover native file read, parse/metadata/index construction, and open request to a paint opportunity after first readable insertion. They exclude process cold startup, native file-picker time, and actual Tauri IPC transport. Cache state and host load are uncontrolled; these are regression measurements, not guaranteed latency figures.
@@ -142,8 +147,7 @@ Select a passage and click **Ask agent** (⌘⇧A / Ctrl+Shift+A), or open it wi
 
 - **Copy for agent:** paste the instruction and context into any agent conversation.
 - **Open in Codex:** opens the installed app with a draft and the local workspace. Context is also copied. Long prompts use a workspace-only link; paste into the new composer when prompted. Nothing is submitted automatically.
-- **Open in Claude Code:** opens the Claude desktop app's Code tab on the workspace through its `claude://code/new` link, with the prompt pre-filled and not sent. The app treats a folder from a link as untrusted and asks you to confirm it. Context is also copied. Prompts over about 14,000 characters open the workspace only; paste the copied context. Needs the Claude desktop app installed.
-- **Open in Supacode:** opens the workspace through `supacode://repo/open`. Supacode's deeplink and CLI have no prompt entry point, so unlike the two routes above the instruction cannot be pre-filled: it is placed on the clipboard and you paste it into a session with Cmd/Ctrl+V. If Supacode ever exposes a prompt parameter, the button becomes the same two-line shape as the others.
+- **Open in Claude Code:** if a Claude desktop session is already working on the document's folder, it switches to that session and names it. Running sessions are read from `~/.claude/sessions/`, and the one whose folder is the closest parent of the document wins. That link takes no prompt, so the context goes on the clipboard and you paste it; nothing is sent. With no such session it opens the Code tab on the workspace through its `claude://code/new` link, with the prompt pre-filled and not sent. The app treats a folder from a link as untrusted and asks you to confirm it. Context is also copied. Prompts over about 14,000 characters open the workspace only; paste the copied context. Needs the Claude desktop app installed.
 
 The handoff includes the absolute file path, the selection's starting section/anchor when available, rendered text, and the rendered content fingerprint (not a Git commit). The selected project is used when it contains the file; otherwise Paneless finds the nearest Git root, including worktrees, or uses the document folder. Expand **Review included context** to inspect the complete payload and workspace before handing it off. A section is the selection's starting section; a quotation can span multiple sections. Selections above 12,000 Unicode characters are explicitly shortened; whole-file contents are not copied automatically.
 
@@ -157,7 +161,7 @@ With the development server and Rust adapter running, `npm run test:handoff` ver
 
 ## Known limitations
 
-Find-in-document searches only what the engine has laid out. Sections carry `content-visibility: auto` so that off-screen content is not laid out, and WebKit does not make skipped content findable ([WebKit bug 283846](https://bugs.webkit.org/show_bug.cgi?id=283846)), so in a document under 2 MiB a match far below the viewport is missed. Above 2 MiB the search runs in Rust over the whole file and is unaffected, which is the wrong way round and is being worked on.
+Find ignores case but not accents: "cafe" does not find "café".
 
 A folder on a network share updates on Refresh only. macOS file watching uses FSEvents, which delivers no events for SMB or NFS volumes. Local folders update as files change. A Refresh against a mount that has hung still waits for the OS timeout, but it holds only that folder's own lock, so the rest of the window stays responsive.
 

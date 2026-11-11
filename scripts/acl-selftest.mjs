@@ -1,11 +1,10 @@
 // Every Tauri plugin command the frontend can invoke must be granted in src-tauri/capabilities/,
 // and every granted permission must be one the frontend actually needs. Nothing at build time
 // reads that file: tsc, cargo and the unit tests all pass with a wrong list, and the app fails only
-// when the feature is used. Two such defects shipped here and were found by hand, not by any
-// tool: `dialog:allow-save` missing (Cmd-S on a new file: "Command plugin:dialog|save not allowed
-// by ACL"), and a window-close button that did nothing while the list granted
-// `dialog:allow-confirm` — confirm() does not invoke a `confirm` command at all, the installed
-// package sends `plugin:dialog|message`, and the close path needs `core:window:allow-destroy`.
+// when the feature is used. Twice in two days a user found it first — `dialog:allow-save`
+// missing (Cmd-S on a new file: "Command plugin:dialog|save not allowed by ACL"), then a dead
+// close button while the list granted `dialog:allow-confirm`: confirm() does not invoke a `confirm`
+// command at all, the installed package sends `plugin:dialog|message`.
 //
 // So neither side of the mapping is typed by hand; both are read from what is installed:
 //   - what the frontend CAN invoke: every @tauri-apps import in src/**/*.ts(x), the exported
@@ -26,8 +25,8 @@
 // and any file that is not src/**/*.ts(x). Write plugin calls in the plain direct style and this
 // test can see them; get clever and it cannot. Commands issued from Rust are not ACL-gated at all.
 //
-// Run it with `npm run test:acl`, and ideally from CI: it needs no app, no dev server and no
-// network, so it costs a fraction of a second.
+// Named *selftest* ON PURPOSE: that is the pattern .claude/hooks/code-review-gate.sh globs for when
+// it runs every committed test before a push. Renaming it hides it from the gate.
 // Usage: node scripts/acl-selftest.mjs [capability.json …]   (default: every src-tauri/capabilities/*.json)
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";

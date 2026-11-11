@@ -81,7 +81,7 @@ for (const [engine, type] of [
         });
     };
     const refresh = async () => {
-      await button("Refresh project").click();
+      await button("Refresh folders").click();
       await page.waitForFunction(() => !document.querySelector(".inbox-hint"));
     };
     const changed = async (path) =>
@@ -107,7 +107,7 @@ for (const [engine, type] of [
       "Single-file startup doesn't mount the inbox",
     );
     await button("Toggle project inbox").click();
-    await button("Choose Project Folder").click();
+    await button("Add a folder").click();
     await count("Recent", 2);
     await count("Unread", 0);
     assert.equal(await page.locator(".inbox-row").count(), 2);
@@ -213,8 +213,10 @@ for (const [engine, type] of [
     await page
       .getByText("This file changed on disk. Your edits are safe here.")
       .waitFor();
+    // The editor is CodeMirror, a contenteditable, so read its rendered text: inputValue()
+    // answers only <input>, <textarea> and <select>.
     assert.equal(
-      await page.getByRole("textbox", { name: "Markdown source" }).inputValue(),
+      await page.getByRole("textbox", { name: "Markdown source" }).innerText(),
       "# My unsaved review",
     );
     await refresh();
@@ -224,7 +226,7 @@ for (const [engine, type] of [
     await count("Unread", 0);
     await page.waitForTimeout(150);
     await count("Updated", 0);
-    // Reopen to discard this test editor without touching the user's files.
+    // Reopen to discard this test editor without touching real files.
     await page.goto("http://127.0.0.1:1420/");
     await button("Toggle project inbox").click();
     await count("Pinned", 1);
@@ -253,13 +255,16 @@ for (const [engine, type] of [
       "No horizontal overflow",
     );
     await page.setViewportSize({ width: 1240, height: 850 });
-    await page
-      .getByRole("combobox", { name: "Project folder filter" })
-      .selectOption("reports");
-    assert.equal(await page.locator(".inbox-row").count(), 2);
-    await page
-      .getByRole("combobox", { name: "Project folder filter" })
-      .selectOption("");
+    // The folder chip hides and shows that folder's documents (it replaced the old
+    // per-subfolder dropdown when the inbox became multi-folder).
+    const folder = page.locator(".inbox-folder-toggle");
+    const shown = await page.locator(".inbox-row").count();
+    assert.ok(shown > 0, "The folder toggle step needs rows on screen to hide");
+    await folder.click();
+    assert.equal(await folder.getAttribute("aria-pressed"), "false");
+    assert.equal(await page.locator(".inbox-row").count(), 0);
+    await folder.click();
+    assert.equal(await page.locator(".inbox-row").count(), shown);
     await Promise.all(
       Array.from({ length: 125 }, (_, i) =>
         writeFile(
@@ -276,11 +281,11 @@ for (const [engine, type] of [
       "Long lists mount a bounded first page",
     );
     await page
-      .getByRole("textbox", { name: "Filter project documents" })
+      .getByRole("textbox", { name: "Filter documents" })
       .fill("Working note 124");
     assert.equal(await page.locator(".inbox-row").count(), 1);
     await page
-      .getByRole("textbox", { name: "Filter project documents" })
+      .getByRole("textbox", { name: "Filter documents" })
       .fill("");
     await page.locator(".inbox-open").first().focus();
     await page.keyboard.press("ArrowDown");
@@ -291,8 +296,12 @@ for (const [engine, type] of [
         .evaluate((e) => e === document.activeElement),
       true,
     );
-    await button("Close project").click();
-    await button("Choose Project Folder").waitFor();
+    await button("Remove all folders").click();
+    // "Add a folder" is always in the header, so it cannot show the removal finished; the
+    // folder chips can — they go only once the adapter has dropped every folder.
+    await page.waitForFunction(
+      () => !document.querySelector(".inbox-folder-toggle"),
+    );
     assert.deepEqual(errors, []);
     console.log(
       `${engine}: inbox baseline, new/updated/read, pin persistence, filters, navigation, live refresh, edit protection, bounded list and keyboard passed`,

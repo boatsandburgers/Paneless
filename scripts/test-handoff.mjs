@@ -31,13 +31,13 @@ try {
           /<script type="module" src="\/src\/bootstrap\.tsx[^\"]*"><\/script>/,
           `<script type="module">
           import { mockIPC, mockWindows } from '/node_modules/@tauri-apps/api/mocks.js';
-          mockWindows('main'); window.copied=''; window.opened=null; window.openedClaude=null; window.failCodex=false;
+          mockWindows('main'); window.copied=''; window.opened=null; window.openedClaude=null; window.claudeOpened={kind:'newWithPrompt'}; window.failCodex=false;
           mockIPC(async (name,args) => {
             if(name==='take_pending')return ${JSON.stringify(file)};
             if(name==='set_dirty'||name.startsWith('plugin:window|'))return;
             if(name==='plugin:clipboard-manager|write_text'){window.copied=args.text;return;}
             if(name==='open_codex'){ if(window.failCodex)throw Error('Codex unavailable. Context copied.'); window.opened=args; return false; }
-            if(name==='open_claude'){ window.openedClaude=args; return true; }
+            if(name==='open_claude'){ window.openedClaude=args; return window.claudeOpened; }
             const r=await fetch('/api/'+name,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(args)}); const value=await r.json();if(!r.ok)throw Error(value.error);return value;
           }, {shouldMockEvents:true});
           await import('/src/bootstrap.tsx');
@@ -126,7 +126,39 @@ try {
       const openedClaude = await page.evaluate(() => window.openedClaude);
       assert.equal(openedClaude.workspace, temp);
       assert.equal(openedClaude.prompt, await page.evaluate(() => window.copied));
-      await modal.getByRole("status").getByText(/Opened in Claude Code/).waitFor();
+      // Each of open_claude's three outcomes gets its own status line: a new
+      // session with the prompt in the link, a new one without it, and the session already
+      // working on this folder, which a link cannot fill in.
+      const claudeStatus = async (opened, text) => {
+        await page.evaluate((opened) => {
+          window.claudeOpened = opened;
+          window.openedClaude = null;
+        }, opened);
+        await modal
+          .getByRole("button", { name: "Open in Claude Code", exact: true })
+          .click();
+        await page.waitForFunction(() => window.openedClaude !== null);
+        await modal.getByRole("status").getByText(text).waitFor();
+      };
+      await modal
+        .getByRole("status")
+        .getByText(/^Opened in Claude's Code tab with the prompt filled in, not sent\./)
+        .waitFor();
+      await claudeStatus(
+        { kind: "existingSession", session: "Notes" },
+        /^Switched to your Claude Code session “Notes”\. Nothing was sent: the context is copied, so paste it there \(⌘V\)/,
+      );
+      await claudeStatus(
+        { kind: "newWithoutPrompt" },
+        /^Opened Claude's Code tab on the workspace\. The prompt was too long/,
+      );
+      await claudeStatus(
+        { kind: "newWithPrompt" },
+        /^Opened in Claude's Code tab with the prompt filled in, not sent\./,
+      );
+      // The Supacode button was removed.
+      assert.equal(await modal.getByRole("button", { name: /Supacode/ }).count(), 0);
+      assert.doesNotMatch(await modal.textContent(), /Supacode/);
       await page.screenshot({ path: `test-results/handoff-${name}-light.png` });
       await page.evaluate(() => {
         document.documentElement.dataset.theme = "dark";
@@ -149,7 +181,7 @@ try {
       await page.getByRole("button", { name: "Close agent handoff" }).click();
       assert.deepEqual(errors, []);
       console.log(
-        `${name}: selection, section, clipboard, stale snapshot, provider fallback, Claude Code link, modal and narrow layout passed`,
+        `${name}: selection, section, clipboard, stale snapshot, provider fallback, Claude Code outcomes, no Supacode, modal and narrow layout passed`,
       );
     } finally {
       await browser.close();

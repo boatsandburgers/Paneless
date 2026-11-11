@@ -225,7 +225,7 @@ pub fn create_markdown_file(path: &Path, source: &str) -> Result<(), String> {
                 e.to_string()
             }
         })?;
-    // A failed write removes the file again, so a retry meets the folder the user saw. Left
+    // A failed write removes the file again, so a retry meets the folder as it was. Left
     // behind, it would make the next attempt fail with "already exists" — naming this call's own
     // half-written file as the obstacle. It was created microseconds earlier by this call, so
     // removing it can only undo our own work.
@@ -271,19 +271,67 @@ async fn search_document(
     app: tauri::AppHandle,
     id: u64,
     query: String,
-) -> Result<Vec<usize>, String> {
+) -> Result<Vec<(usize, usize)>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let doc = app.state::<Reader>().get(id)?;
-        let q = query.to_lowercase();
-        Ok(doc
-            .texts
-            .iter()
-            .enumerate()
-            .filter_map(|(i, t)| t.to_lowercase().contains(&q).then_some(i))
-            .collect())
+        Ok(count_matches(&doc.texts, &query))
     })
     .await
     .map_err(|e| e.to_string())?
+}
+/// Whitespace runs to one space, then lowercase, then the letters JavaScript's case-insensitive
+/// matching treats as equal although their lowercase differs (final sigma, long s, Greek symbol
+/// forms). Otherwise the count over 2 MiB and the page's own matches disagree.
+fn fold(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'ς' => 'σ',
+            'ſ' => 's',
+            'ϐ' => 'β',
+            'ϑ' => 'θ',
+            'ϕ' => 'φ',
+            'ϖ' => 'π',
+            'ϰ' => 'κ',
+            'ϱ' => 'ρ',
+            'ϵ' => 'ε',
+            'ẛ' => 'ṡ',
+            '\u{1FBE}' => 'ι',
+            'µ' => 'μ',
+            '\u{1FD3}' => '\u{0390}',
+            '\u{1FE3}' => '\u{03B0}',
+            '\u{1C80}' => 'в',
+            '\u{1C81}' => 'д',
+            '\u{1C82}' => 'о',
+            '\u{1C83}' => 'с',
+            '\u{1C84}' | '\u{1C85}' => 'т',
+            '\u{1C86}' => 'ъ',
+            '\u{1C87}' => 'ѣ',
+            '\u{1C88}' => 'ꙋ',
+            '\u{FB05}' => '\u{FB06}',
+            c => c,
+        })
+        .collect()
+}
+/// Each section that holds the query, with how many times. Counted the way findMatches
+/// in findText.ts matches: ignoring case, with any run of whitespace standing for a space.
+pub fn count_matches(texts: &[String], query: &str) -> Vec<(usize, usize)> {
+    let q = fold(query);
+    if q.is_empty() {
+        return Vec::new();
+    }
+    texts
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let text = fold(t);
+            let n = text.matches(&q).count();
+            (n > 0).then_some((i, n))
+        })
+        .collect()
 }
 #[tauri::command]
 fn document_source(state: State<Reader>, id: u64) -> Result<String, String> {
@@ -369,7 +417,6 @@ pub fn run() {
             handoff::handoff_context,
             handoff::open_codex,
             handoff::open_claude,
-            handoff::open_supacode,
             document_chunks,
             document_source,
             save_document,
@@ -416,6 +463,39 @@ pub fn run() {
 #[cfg(test)]
 mod reader_tests {
     use super::*;
+    #[test]
+    fn search_counts_what_the_page_shows() {
+        // A word split by bold counts once, an image's alt text not at all, a phrase
+        // across a line wrap matches, and case is ignored while õ stays distinct from o.
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("count.md");
+        fs::write(
+            &source,
+            "![converge](x.png)\n\nHere con**verge** meets, and CONVERGE again.\n\nA split\nphrase. Sõda.\n",
+        )
+        .unwrap();
+        let doc = document::load(&source, 1).unwrap();
+        let total = |q: &str| count_matches(&doc.texts, q).iter().map(|(_, n)| n).sum::<usize>();
+        assert_eq!(total("converge"), 2);
+        assert_eq!(total("split phrase"), 1);
+        assert_eq!(total("SÕDA"), 1);
+        assert_eq!(total("soda"), 0);
+        assert_eq!(total("   "), 0);
+        // Final sigma and long s equal their ordinary forms, as on the page.
+        let greek = root.path().join("greek.md");
+        fs::write(&greek, "ΟΔΟΣ οδος. Long ſ and s.\n").unwrap();
+        let doc = document::load(&greek, 2).unwrap();
+        let total = |q: &str| count_matches(&doc.texts, q).iter().map(|(_, n)| n).sum::<usize>();
+        assert_eq!(total("οδοσ"), 2);
+        assert_eq!(total("οδος"), 2);
+        assert_eq!(total("ſ"), 2);
+        // The micro sign is Greek mu to JavaScript, so it is here (review round 2).
+        let micro = root.path().join("micro.md");
+        fs::write(&micro, "5 µm and 5 μm.\n").unwrap();
+        let doc = document::load(&micro, 3).unwrap();
+        assert_eq!(count_matches(&doc.texts, "μm").iter().map(|(_, n)| n).sum::<usize>(), 2);
+        assert_eq!(count_matches(&doc.texts, "µm").iter().map(|(_, n)| n).sum::<usize>(), 2);
+    }
     #[test]
     fn relative_links_stay_inside_the_selected_project() {
         let root = tempfile::tempdir().unwrap();

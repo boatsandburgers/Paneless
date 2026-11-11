@@ -114,6 +114,11 @@ button svg {
 ::selection {
   background: color-mix(in srgb, var(--accent) 32%, transparent);
 }
+/* The match find jumped to: a CSS highlight, so the keyboard stays in the find box. */
+::highlight(find-match) {
+  background-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--text);
+}
 .app {
   height: 100%;
   display: flex;
@@ -636,19 +641,39 @@ button svg {
   border-bottom: 1px solid var(--line);
   font-size: 12px;
 }
-.findbar input {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  color: var(--text);
-  border-radius: 4px;
-  padding: 6px 8px;
+/* The count is part of the field, as in Google Docs: the border is on the wrapper, so a
+   long query and a five-digit count share the width instead of overlapping. */
+.find-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 90px;
   flex: 1;
   max-width: 280px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 8px 0 0;
 }
-.findbar span {
+.find-field:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.findbar input {
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  padding: 6px 8px;
+  flex: 1;
+  min-width: 0;
+}
+.find-count {
+  flex: none;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .findbar button {
   padding: 6px;
@@ -757,9 +782,6 @@ button svg {
   .findbar {
     padding: 8px 10px;
     gap: 3px;
-  }
-  .findbar span {
-    display: none;
   }
   .source-editor {
     padding: 20px;

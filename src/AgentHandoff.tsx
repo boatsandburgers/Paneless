@@ -33,7 +33,7 @@ export default function AgentHandoff({
     };
   }, [snapshot]);
   const act = async (
-    action: "copy" | "codex" | "claude-open" | "supacode",
+    action: "copy" | "codex" | "claude-open",
   ) => {
     if (pending || !context) return;
     setPending(true);
@@ -51,15 +51,20 @@ export default function AgentHandoff({
         ).writeText(prompt);
       else await navigator.clipboard.writeText(prompt);
       if (action === "claude-open") {
-        const included = await command<boolean>("open_claude", {
+        const opened = await command<
+          | { kind: "newWithPrompt" | "newWithoutPrompt" }
+          | { kind: "existingSession"; session: string }
+        >("open_claude", {
           id: snapshot.info.id,
           workspace: fresh.workspace,
           prompt,
         });
         setMessage(
-          included
-            ? "Opened in Claude's Code tab with the prompt filled in, not sent. Confirm the folder there. Context also copied."
-            : "Opened Claude's Code tab on the workspace. The prompt was too long for the link; paste it (it is copied).",
+          opened.kind === "existingSession"
+            ? `Switched to your Claude Code session “${opened.session}”. Nothing was sent: the context is copied, so paste it there (⌘V) and press Enter.`
+            : opened.kind === "newWithPrompt"
+              ? "Opened in Claude's Code tab with the prompt filled in, not sent. Confirm the folder there. Context also copied."
+              : "Opened Claude's Code tab on the workspace. The prompt was too long for the link; paste it (it is copied).",
         );
       } else if (action === "codex") {
         const included = await command<boolean>("open_codex", {
@@ -71,15 +76,6 @@ export default function AgentHandoff({
           included
             ? "Opened in Codex for review. Context also copied."
             : "Context copied. Paste it into the new Codex composer.",
-        );
-      } else if (action === "supacode") {
-        await command<boolean>("open_supacode", {
-          id: snapshot.info.id,
-          workspace: fresh.workspace,
-          prompt,
-        });
-        setMessage(
-          "Opened Supacode on the workspace. Supacode can't take the prompt through the link — it is copied; paste it (⌘V) into a session.",
         );
       } else setMessage("Copied. Paste into your agent conversation.");
     } catch (e) {
@@ -181,18 +177,12 @@ export default function AgentHandoff({
         >
           Open in Claude Code
         </button>
-        <button
-          disabled={!native || !context || pending}
-          onClick={() => void act("supacode")}
-        >
-          Open in Supacode
-        </button>
       </div>
       <p className="handoff-hint">
-        Codex opens a draft for review. Claude Code opens the desktop app's
-        Code tab with the prompt filled in; nothing is sent until you press
-        Enter. Supacode opens the workspace — paste the copied prompt into a
-        session.
+        Codex opens a draft for review. Claude Code opens the session already
+        working on this folder, with the context copied to paste, or else a
+        new one with the prompt filled in; nothing is sent until you press
+        Enter.
       </p>
       <p className="handoff-result" role="status">
         {pending ? "Preparing handoff…" : message}

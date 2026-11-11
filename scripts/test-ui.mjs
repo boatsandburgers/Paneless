@@ -76,12 +76,121 @@ for (const [engine, type] of [
     }
   }
   await page.setViewportSize({ width: 1060, height: 800 });
+  // Selected source text stays readable: every syntax colour, as drawn inside the selection,
+  // reaches WCAG AA 4.5:1 on the selection with the active-line tint on top. Measured
+  // focused, and again after a click on the status bar: in WebKit that click drops the DOM
+  // selection while CodeMirror keeps drawing its own, so ::selection alone cannot be relied on.
+  await writeFile(
+    "test-results/selection.md",
+    "# Heading one\n\nPlain text with **bold words**, *italic* and `inline code`.\n\n## Heading two\n\n[a link](https://example.com) and <https://example.org>\n\n> a quoted line\n\n---\n",
+  );
+  const measureSelection = () =>
+    page.evaluate(() => {
+      const rgba = (s) => {
+        const m = s.match(/[\d.]+/g).map(Number);
+        const k = s.startsWith("color(") ? 255 : 1;
+        return [m[0] * k, m[1] * k, m[2] * k, m.length > 3 ? m[3] : 1];
+      };
+      const over = (f, b) =>
+        f.map((v, i) => (i < 3 ? v * f[3] + b[i] * (1 - f[3]) : 1));
+      const lum = (c) =>
+        [0.2126, 0.7152, 0.0722].reduce((sum, w, i) => {
+          const v = c[i] / 255;
+          return (
+            sum + w * (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+          );
+        }, 0);
+      const ratio = (a, b) => {
+        const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+        return (x + 0.05) / (y + 0.05);
+      };
+      const css = (e) => getComputedStyle(e);
+      const editor = document.querySelector(".cm-editor");
+      const layer = document.querySelector(".cm-selectionBackground");
+      const active = document.querySelector(".cm-activeLine");
+      if (!layer) return { ratio: 0, text: "no selection drawn" };
+      const selection = over(
+        rgba(css(layer).backgroundColor),
+        rgba(css(editor).backgroundColor),
+      );
+      const backs = [
+        selection,
+        over(
+          rgba(active ? css(active).backgroundColor : "rgba(0,0,0,0)"),
+          selection,
+        ),
+      ];
+      // The element's own colour is what is painted: selected text is coloured by a decoration,
+      // and no ::selection rule sets a colour. getComputedStyle(e, "::selection") is not used
+      // because, with no such rule, it does not report the painted colour (checked by pixels).
+      // `highlighted` collects only syntax-highlight spans (CodeMirror's generated ͼ classes),
+      // so the token check below fails if a guarded kind sits in no highlight span at all.
+      let low = { ratio: Infinity, highlighted: "" };
+      for (const e of document.querySelectorAll(".cm-line, .cm-line span")) {
+        if (!e.textContent.trim()) continue;
+        if (e.tagName === "SPAN" && e.className.includes("ͼ"))
+          low.highlighted += e.textContent + " ";
+        for (const back of backs) {
+          const value = ratio(over(rgba(css(e).color), back), back);
+          if (value < low.ratio)
+            low = { ...low, ratio: value, text: e.textContent.slice(0, 30) };
+        }
+      }
+      return low;
+    });
+  for (const theme of ["Light", "Dark"]) {
+    await page.locator('[aria-label="Reading appearance"]').click();
+    await page.getByRole("button", { name: theme, exact: true }).click();
+    await page.locator('[aria-label="Close appearance"]').click();
+    await open("test-results/selection.md");
+    await page
+      .getByRole("button", { name: "Edit source", exact: true })
+      .click();
+    await page
+      .getByRole("textbox", { name: "Markdown source" })
+      .press("ControlOrMeta+a");
+    await page.waitForTimeout(150);
+    for (const state of ["focused", "after a click outside"]) {
+      if (state !== "focused") {
+        await page.locator(".statusbar").click();
+        await page.waitForTimeout(150);
+      }
+      const worst = await measureSelection();
+      // Finite as well: an empty scan would leave Infinity and pass without measuring.
+      assert.ok(
+        Number.isFinite(worst.ratio) && worst.ratio >= 4.5,
+        `${theme} ${state}: selection contrast ${worst.ratio.toFixed(2)}:1 on "${worst.text}"`,
+      );
+      for (const token of [
+        "Heading",
+        "bold",
+        "inline code",
+        "a link",
+        "quoted",
+      ])
+        assert.ok(
+          worst.highlighted.includes(token),
+          `${theme} ${state}: "${token}" not measured`,
+        );
+    }
+    await page.screenshot({
+      path: `test-results/${engine}-selection-${theme.toLowerCase()}.png`,
+    });
+    await page
+      .getByRole("button", { name: "Read document", exact: true })
+      .click();
+  }
   await copyFile("fixtures/welcome.md", "test-results/edit.md");
   await open("test-results/edit.md");
   await page.getByRole("button", { name: "Edit source", exact: true }).click();
-  await page
-    .getByRole("textbox", { name: "Markdown source" })
-    .fill("# Saved successfully\n\nAn edit.");
+  // Replace the text the way a person does, ⌘A and typing (ControlOrMeta, as the selection test above). Playwright's fill races CodeMirror in WebKit
+  // about 1 time in 100 and saves a leading blank line; real keys gave 0 in about 1,770 runs.
+  const replaceSource = async (text) => {
+    await page.getByRole("textbox", { name: "Markdown source" }).click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type(text);
+  };
+  await replaceSource("# Saved successfully\n\nAn edit.");
   await page.getByRole("button", { name: /^Save / }).click();
   await page.waitForTimeout(150);
   assert.equal(
@@ -97,9 +206,7 @@ for (const [engine, type] of [
   );
   // Saving must detect an external edit, including an atomic replacement.
   await page.getByRole("button", { name: "Edit source", exact: true }).click();
-  await page
-    .getByRole("textbox", { name: "Markdown source" })
-    .fill("# Local changes");
+  await replaceSource("# Local changes");
   await writeFile("test-results/edit.md", "# External changes");
   await page.getByRole("button", { name: /^Save / }).click();
   await page.getByRole("alert").waitFor();
