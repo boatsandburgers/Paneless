@@ -29,6 +29,10 @@ percent-encoding = "2"
 tempfile = "3"
 tiny_http = { version = "0.12", optional = true }
 
+# Plain fsync fallback for save() on filesystems that reject F_FULLFSYNC (SMB / network shares).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [features]
 bench-server = ["dep:tiny_http"]
 
@@ -41,3 +45,12 @@ required-features = ["bench-server"]
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Build scripts and PROC MACROS must not be stripped. `strip = true` above otherwise applies to
+# them as well, and stripping a proc-macro dylib removes the metadata rustc uses to recognise it
+# as a crate — the release build then fails with "can't find crate for `ctor_proc_macro`" even
+# though the file is on disk and is passed to rustc. Verified on this machine: a release build of
+# `ctor` fails with the line above alone and succeeds with this override, nothing else changed.
+# The app binary is still stripped; only host-side build tooling keeps its symbols.
+[profile.release.build-override]
+strip = "none"

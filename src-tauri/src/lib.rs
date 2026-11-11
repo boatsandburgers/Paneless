@@ -3,7 +3,9 @@ pub mod handoff;
 mod inbox;
 pub mod project;
 use document::{Document, Info};
-use inbox::{project_close, project_mark, project_open, project_pin, project_refresh, Inbox};
+use inbox::{
+    project_close, project_mark, project_pin, project_refresh, projects_add, projects_remove, Inbox,
+};
 use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
 use std::{
@@ -67,12 +69,27 @@ impl Reader {
             return Err("The file changed on disk. Copy your edits before reloading; your original file has not been overwritten.".into());
         }
         let mut tmp = tempfile::NamedTempFile::new_in(&doc.base).map_err(|e| e.to_string())?;
-        tmp.as_file()
-            .set_permissions(fs::metadata(path).map_err(|e| e.to_string())?.permissions())
-            .map_err(|e| e.to_string())?;
+        // Best-effort: mirror the original file's permissions. Some network shares (SMB) reject
+        // chmod; a failure here must not block the save.
+        if let Ok(meta) = fs::metadata(path) {
+            let _ = tmp.as_file().set_permissions(meta.permissions());
+        }
         tmp.write_all(source.as_bytes())
             .map_err(|e| e.to_string())?;
-        tmp.as_file().sync_all().map_err(|e| e.to_string())?;
+        // Flush to disk before the atomic rename so a crash can't leave a truncated file. On
+        // macOS `sync_all` issues F_FULLFSYNC, which SMB / network shares reject with ENOTSUP
+        // (os error 45) — fall back to a plain fsync (still flushes the write to the server), and
+        // if even that is unsupported, proceed: the atomic rename below, not the flush, is what
+        // guarantees a reader never sees a half-written file.
+        if tmp.as_file().sync_all().is_err() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::io::AsRawFd;
+                unsafe {
+                    libc::fsync(tmp.as_file().as_raw_fd());
+                }
+            }
+        }
         tmp.persist(path).map_err(|e| e.to_string())?;
         // Update the baseline immediately so consecutive saves remain valid.
         let mut current = self.current.lock().unwrap();
@@ -169,7 +186,10 @@ fn resolve_document_link(
     href: String,
 ) -> Result<(String, String), String> {
     let doc = app.state::<Reader>().get(id)?;
-    resolve_markdown_link(&doc, &href, app.state::<Inbox>().root())
+    // Confine the link to the folder that actually contains this document, not the first open
+    // folder — otherwise a "../" link in any but the alphabetically-first root is refused.
+    let root = app.state::<Inbox>().root_for(Path::new(&doc.info.path));
+    resolve_markdown_link(&doc, &href, root)
 }
 #[tauri::command]
 async fn open_document(app: tauri::AppHandle, path: String) -> Result<OpenResult, String> {
@@ -177,6 +197,67 @@ async fn open_document(app: tauri::AppHandle, path: String) -> Result<OpenResult
         let result = app.state::<Reader>().open(Path::new(&path))?;
         watch(&app, PathBuf::from(&result.info.path));
         Ok(result)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+/// Create a NEW Markdown file and fill it. Refuses every path that already exists, and leaves
+/// nothing behind when the write fails. Split out of the command so it can be tested: the command
+/// itself needs a running Tauri app, this does not.
+pub fn create_markdown_file(path: &Path, source: &str) -> Result<(), String> {
+    if !document::is_markdown(path) {
+        return Err("Paneless writes Markdown: give the file a .md or .markdown name.".into());
+    }
+    // `create_new` tests for existence and creates in ONE syscall, so a file appearing between a
+    // check and a write cannot be clobbered. A new document never overwrites an existing one,
+    // even if the save panel already asked about replacing it.
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                format!(
+                    "{} already exists and was not touched. Save under another name.",
+                    path.display()
+                )
+            } else {
+                e.to_string()
+            }
+        })?;
+    // A failed write removes the file again, so a retry meets the folder as it was. Left
+    // behind, it would make the next attempt fail with "already exists" — naming this call's own
+    // half-written file as the obstacle. It was created microseconds earlier by this call, so
+    // removing it can only undo our own work.
+    if let Err(e) = file.write_all(source.as_bytes()) {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(e.to_string());
+    }
+    Ok(())
+}
+#[tauri::command]
+async fn create_document(
+    app: tauri::AppHandle,
+    path: String,
+    source: String,
+) -> Result<OpenResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&path);
+        create_markdown_file(&path, &source)?;
+        // Open it the same way any other document is opened, so the new file is an ordinary
+        // document from this point on: same id, same watcher, same save path. A failure here is
+        // rolled back too, for the same reason the write is.
+        match app.state::<Reader>().open(&path) {
+            Ok(result) => {
+                watch(&app, PathBuf::from(&result.info.path));
+                Ok(result)
+            }
+            Err(e) => {
+                let _ = fs::remove_file(&path);
+                Err(e)
+            }
+        }
     })
     .await
     .map_err(|e| e.to_string())?
@@ -190,19 +271,67 @@ async fn search_document(
     app: tauri::AppHandle,
     id: u64,
     query: String,
-) -> Result<Vec<usize>, String> {
+) -> Result<Vec<(usize, usize)>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let doc = app.state::<Reader>().get(id)?;
-        let q = query.to_lowercase();
-        Ok(doc
-            .texts
-            .iter()
-            .enumerate()
-            .filter_map(|(i, t)| t.to_lowercase().contains(&q).then_some(i))
-            .collect())
+        Ok(count_matches(&doc.texts, &query))
     })
     .await
     .map_err(|e| e.to_string())?
+}
+/// Whitespace runs to one space, then lowercase, then the letters JavaScript's case-insensitive
+/// matching treats as equal although their lowercase differs (final sigma, long s, Greek symbol
+/// forms). Otherwise the count over 2 MiB and the page's own matches disagree.
+fn fold(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'ς' => 'σ',
+            'ſ' => 's',
+            'ϐ' => 'β',
+            'ϑ' => 'θ',
+            'ϕ' => 'φ',
+            'ϖ' => 'π',
+            'ϰ' => 'κ',
+            'ϱ' => 'ρ',
+            'ϵ' => 'ε',
+            'ẛ' => 'ṡ',
+            '\u{1FBE}' => 'ι',
+            'µ' => 'μ',
+            '\u{1FD3}' => '\u{0390}',
+            '\u{1FE3}' => '\u{03B0}',
+            '\u{1C80}' => 'в',
+            '\u{1C81}' => 'д',
+            '\u{1C82}' => 'о',
+            '\u{1C83}' => 'с',
+            '\u{1C84}' | '\u{1C85}' => 'т',
+            '\u{1C86}' => 'ъ',
+            '\u{1C87}' => 'ѣ',
+            '\u{1C88}' => 'ꙋ',
+            '\u{FB05}' => '\u{FB06}',
+            c => c,
+        })
+        .collect()
+}
+/// Each section that holds the query, with how many times. Counted the way findMatches
+/// in findText.ts matches: ignoring case, with any run of whitespace standing for a space.
+pub fn count_matches(texts: &[String], query: &str) -> Vec<(usize, usize)> {
+    let q = fold(query);
+    if q.is_empty() {
+        return Vec::new();
+    }
+    texts
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let text = fold(t);
+            let n = text.matches(&q).count();
+            (n > 0).then_some((i, n))
+        })
+        .collect()
 }
 #[tauri::command]
 fn document_source(state: State<Reader>, id: u64) -> Result<String, String> {
@@ -284,6 +413,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_document,
+            create_document,
             handoff::handoff_context,
             handoff::open_codex,
             handoff::open_claude,
@@ -295,7 +425,8 @@ pub fn run() {
             quit,
             search_document,
             resolve_document_link,
-            project_open,
+            projects_add,
+            projects_remove,
             project_refresh,
             project_mark,
             project_pin,
@@ -332,6 +463,39 @@ pub fn run() {
 #[cfg(test)]
 mod reader_tests {
     use super::*;
+    #[test]
+    fn search_counts_what_the_page_shows() {
+        // A word split by bold counts once, an image's alt text not at all, a phrase
+        // across a line wrap matches, and case is ignored while õ stays distinct from o.
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("count.md");
+        fs::write(
+            &source,
+            "![converge](x.png)\n\nHere con**verge** meets, and CONVERGE again.\n\nA split\nphrase. Sõda.\n",
+        )
+        .unwrap();
+        let doc = document::load(&source, 1).unwrap();
+        let total = |q: &str| count_matches(&doc.texts, q).iter().map(|(_, n)| n).sum::<usize>();
+        assert_eq!(total("converge"), 2);
+        assert_eq!(total("split phrase"), 1);
+        assert_eq!(total("SÕDA"), 1);
+        assert_eq!(total("soda"), 0);
+        assert_eq!(total("   "), 0);
+        // Final sigma and long s equal their ordinary forms, as on the page.
+        let greek = root.path().join("greek.md");
+        fs::write(&greek, "ΟΔΟΣ οδος. Long ſ and s.\n").unwrap();
+        let doc = document::load(&greek, 2).unwrap();
+        let total = |q: &str| count_matches(&doc.texts, q).iter().map(|(_, n)| n).sum::<usize>();
+        assert_eq!(total("οδοσ"), 2);
+        assert_eq!(total("οδος"), 2);
+        assert_eq!(total("ſ"), 2);
+        // The micro sign is Greek mu to JavaScript, so it is here (review round 2).
+        let micro = root.path().join("micro.md");
+        fs::write(&micro, "5 µm and 5 μm.\n").unwrap();
+        let doc = document::load(&micro, 3).unwrap();
+        assert_eq!(count_matches(&doc.texts, "μm").iter().map(|(_, n)| n).sum::<usize>(), 2);
+        assert_eq!(count_matches(&doc.texts, "µm").iter().map(|(_, n)| n).sum::<usize>(), 2);
+    }
     #[test]
     fn relative_links_stay_inside_the_selected_project() {
         let root = tempfile::tempdir().unwrap();
@@ -393,5 +557,72 @@ mod reader_tests {
         let next = reader.open(&path).unwrap();
         assert_ne!(next.info.id, opened.info.id);
         assert!(reader.chunks(opened.info.id, 0).is_err());
+    }
+    #[test]
+    fn new_file_holds_exactly_the_source_even_when_empty() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("new.md");
+        create_markdown_file(&path, "# Hello\n\nbody").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "# Hello\n\nbody");
+        // A blank note is a legal note: it must exist and hold nothing, not a placeholder.
+        let empty = directory.path().join("empty.md");
+        create_markdown_file(&empty, "").unwrap();
+        assert_eq!(fs::read(&empty).unwrap(), b"");
+    }
+    #[test]
+    fn an_existing_file_is_never_overwritten() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("existing.md");
+        fs::write(&path, "# Original").unwrap();
+        let err = create_markdown_file(&path, "# Replacement").unwrap_err();
+        assert!(err.contains("already exists and was not touched"), "{err}");
+        assert_eq!(fs::read(&path).unwrap(), b"# Original");
+    }
+    #[test]
+    fn non_markdown_names_are_refused_and_nothing_is_created() {
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["notes.txt", "notes", "notes.md.bak", "notes.mdx"] {
+            let path = directory.path().join(name);
+            assert!(create_markdown_file(&path, "# Notes").is_err(), "{name}");
+            assert!(!path.exists(), "{name} was created");
+        }
+    }
+    #[test]
+    fn extension_check_is_case_insensitive_like_open() {
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["NOTE.MD", "Note.Markdown"] {
+            let path = directory.path().join(name);
+            create_markdown_file(&path, "# Note").unwrap();
+            assert_eq!(fs::read_to_string(&path).unwrap(), "# Note", "{name}");
+        }
+    }
+    #[test]
+    fn a_directory_or_a_missing_parent_fails_without_panicking() {
+        let directory = tempfile::tempdir().unwrap();
+        let folder = directory.path().join("folder.md");
+        fs::create_dir(&folder).unwrap();
+        assert!(create_markdown_file(&folder, "# Not a file").is_err());
+        assert!(folder.is_dir());
+        // The save panel only offers folders that exist; a parent that does not is not ours to
+        // create silently.
+        let orphan = directory.path().join("missing/new.md");
+        assert!(create_markdown_file(&orphan, "# Orphan").is_err());
+        assert!(!orphan.exists());
+        assert!(!directory.path().join("missing").exists());
+    }
+    #[test]
+    fn case_insensitive_disk_blocks_a_case_variant_of_an_existing_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let upper = directory.path().join("EXISTING.md");
+        fs::write(&upper, "# Keep").unwrap();
+        let lower = directory.path().join("existing.md");
+        // On a case-sensitive disk these are two different files and the guarantee does not
+        // apply; the probe is the same file the assertion uses, so the test cannot lie.
+        if !lower.exists() {
+            return;
+        }
+        let err = create_markdown_file(&lower, "# Replacement").unwrap_err();
+        assert!(err.contains("already exists and was not touched"), "{err}");
+        assert_eq!(fs::read(&upper).unwrap(), b"# Keep");
     }
 }

@@ -24,6 +24,61 @@
   height: 24px;
   width: 24px;
 }
+.inbox-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* Folder toggles: one chip per added folder; accent when shown, faded when off. */
+.inbox-folders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 14px 12px;
+}
+.inbox-folder {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 7px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.inbox-folder:not(.off) {
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color: transparent;
+}
+.inbox-folder-toggle {
+  padding: 5px 4px 5px 10px;
+  font-size: 12px;
+  color: var(--text);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inbox-folder.off .inbox-folder-toggle {
+  color: var(--muted);
+}
+.inbox-folder.offline .inbox-folder-toggle {
+  color: #b45545;
+}
+.inbox-folder-remove {
+  padding: 5px 8px 5px 4px;
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0;
+}
+.inbox-folder:hover .inbox-folder-remove,
+.inbox-folder-remove:focus-visible {
+  opacity: 1;
+}
+.inbox-folder-remove:hover {
+  color: var(--text);
+}
+.inbox-folder-warn {
+  color: #b45545;
+}
 .inbox-project {
   display: flex;
   gap: 8px;
@@ -60,17 +115,17 @@
   grid-template-columns: repeat(4, 1fr);
   border-radius: 8px;
   margin: 0 14px 12px;
-  gap: 1px;
+  gap: 2px;
   border: 0;
   padding: 0;
 }
 .inbox-tabs button {
-  border-radius: 5px;
+  border-radius: 7px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  padding: 9px 3px;
+  padding: 8px 3px;
   font-size: 12px;
   white-space: nowrap;
   color: var(--inbox-secondary);
@@ -85,8 +140,7 @@
 .inbox-tabs button.active {
   color: var(--text);
   font-weight: 600;
-  background: var(--bg);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
 }
 .inbox-filters {
   display: flex;
@@ -98,19 +152,22 @@
 .inbox-filters select {
   min-width: 0;
   width: 100%;
+  height: 34px;
   border: 1px solid var(--line);
   background: var(--bg);
   color: var(--text);
-  border-radius: 6px;
-  padding: 9px 10px;
+  border-radius: 8px;
+  padding: 0 11px;
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
+}
+.inbox-filters input:focus-visible,
+.inbox-filters select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .inbox-filters select {
-  padding: 6px 8px;
-  background: transparent;
-  min-height: 31px;
-  font-size: 12px;
   color: var(--inbox-secondary);
 }
 .inbox-list {
@@ -122,16 +179,12 @@
 .inbox-row {
   position: relative;
   border: 0;
-  border-bottom: 1px solid var(--line);
-  margin: 0;
-  border-radius: 0;
+  margin: 2px 0;
+  border-radius: 8px;
 }
 .inbox-row.current {
-  border-color: var(--line);
-  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
-  border-radius: 6px;
-  border-bottom-color: transparent;
-  box-shadow: inset 3px 0 0 var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-radius: 8px;
 }
 .inbox-open {
   display: flex;
@@ -222,19 +275,31 @@
   align-items: center;
   justify-content: space-between;
 }
-.inbox-footer button {
-  border-radius: 4px;
-  padding: 4px;
-  font-size: 11px;
-}
 .inbox-footer p {
   line-height: 1.6;
   font-size: 10px;
   margin: 8px 0 3px;
 }
-.inbox-stop {
-  color: var(--muted);
-  margin-top: 3px;
+/* Footer actions in one row: both the accent-tinted pill (same size + colour). */
+.inbox-footer .inbox-footer-actions {
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+}
+.inbox-action {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border: 0;
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 11px;
+}
+.inbox-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 26%, var(--panel));
+}
+.inbox-action:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .inbox-empty {
   padding: 45px 20px;
@@ -304,10 +369,6 @@
 /* Keep the reading hierarchy clear: title, short preview, then file details. */
 .inbox-tabs button .zero-count {
   display: none;
-}
-.inbox-filters input {
-  font-size: 13px;
-  padding: 9px 11px;
 }
 .inbox-filters input::placeholder {
   color: var(--muted);

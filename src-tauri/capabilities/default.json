@@ -6,8 +6,10 @@
     "core:default",
     "clipboard-manager:allow-write-text",
     "core:window:allow-set-title",
+    "core:window:allow-set-theme",
     "dialog:allow-open",
-    "dialog:allow-confirm",
+    "dialog:allow-save",
+    "dialog:allow-message",
     {
       "identifier": "opener:allow-open-url",
       "allow": [
@@ -22,6 +24,7 @@
         }
       ]
     },
-    "core:window:allow-close"
+    "core:window:allow-close",
+    "core:window:allow-destroy"
   ]
 }

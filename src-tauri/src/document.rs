@@ -256,6 +256,7 @@ fn render_markdown(source: &str, id: u64) -> (Vec<String>, Vec<Heading>, Vec<Str
     let mut events = Vec::new();
     let mut size = 0;
     let mut depth = 0usize;
+    let mut in_image = 0usize;
     let mut heading_start = None;
     let mut heading_text = String::new();
     let mut heading_level = 1u8;
@@ -333,8 +334,24 @@ fn render_markdown(source: &str, id: u64) -> (Vec<String>, Vec<Heading>, Vec<Str
             Event::End(_) => depth = depth.saturating_sub(1),
             _ => {}
         }
+        // The searchable text holds what the page shows: no break inside a word that is only
+        // partly bold or linked, and no image's alt text.
         match &event {
-            Event::Text(t) | Event::Code(t) => text.push_str(t),
+            Event::Start(Tag::Image { .. }) => in_image += 1,
+            Event::End(TagEnd::Image) => in_image = in_image.saturating_sub(1),
+            _ => {}
+        }
+        match &event {
+            Event::Text(t) | Event::Code(t) if in_image == 0 => text.push_str(t),
+            Event::End(
+                TagEnd::Emphasis
+                | TagEnd::Strong
+                | TagEnd::Strikethrough
+                | TagEnd::Superscript
+                | TagEnd::Subscript
+                | TagEnd::Link
+                | TagEnd::Image,
+            ) => {}
             Event::SoftBreak | Event::HardBreak | Event::End(_) => text.push(' '),
             _ => {}
         }

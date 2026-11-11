@@ -1,6 +1,14 @@
 import { useEffect, useRef } from "react";
 import { command, navigateToHeading, type OpenResult } from "./types";
 import type { Metrics } from "./Reader";
+import {
+  findMatches,
+  holdsMatch,
+  indexText,
+  matchGeneration,
+  onMatchChange,
+  showMatch,
+} from "./findText";
 /** Only used after the measured full-DOM limit. HTML stays native within visible sections. */
 export default function LargeReader({
   doc,
@@ -45,7 +53,9 @@ export default function LargeReader({
     function evict(index: number) {
       if (!mounted.has(index)) return;
       const section = sections[index];
-      // Keep an actively selected section intact while copying text.
+      // Keep an actively selected section intact while copying text, and the section holding the
+      // find match, or its mark is gone on scrolling back.
+      if (holdsMatch(section)) return;
       const selection = getSelection();
       if (
         selection &&
@@ -54,9 +64,21 @@ export default function LargeReader({
           section.contains(selection.focusNode))
       )
         return;
-      section.style.height = `${Math.max(100, section.getBoundingClientRect().height)}px`;
+      // A section that measures nothing stays: only raw HTML was in it, and that renders empty. As
+      // placeholders they would all sit at one spot, and each return there would fetch them all again.
+      const { height } = section.getBoundingClientRect();
+      if (!height) return;
+      // Its real height, however short. A taller placeholder shrinks when it comes back, and at the
+      // end of the document that pulls up whatever the reader is looking at.
+      section.style.height = `${height}px`;
       section.replaceChildren();
       mounted.delete(index);
+    }
+    // The observer reports a section only when it crosses the margin, so one that evict spared,
+    // already off screen, gets no second chance. This is it, once the reason to spare it is gone:
+    // the match moved or closed, or the selection cleared.
+    function sweep() {
+      for (const index of [...mounted]) if (!wanted.has(index)) evict(index);
     }
     function mount(index: number): Promise<void> {
       if (mounted.has(index)) return Promise.resolve();
@@ -76,8 +98,12 @@ export default function LargeReader({
         const section = sections[index];
         const before = section.getBoundingClientRect();
         const scroller = root.parentElement!;
-        const isAboveViewport =
-          before.bottom <= scroller.getBoundingClientRect().top;
+        const pane = scroller.getBoundingClientRect();
+        // A section starting above the pane whose bottom edge is in view grows upward, so what is
+        // below it stays where it is: the find match after a jump, or the lines being read.
+        // Testing only for a section wholly above missed an edge a fraction of a pixel inside.
+        // A section that fills the pane has nothing in view to hold still.
+        const growsUpward = before.top < pane.top && before.bottom <= pane.bottom;
         section.innerHTML = html || "";
         section.style.height = "auto";
         mounted.add(index);
@@ -94,9 +120,10 @@ export default function LargeReader({
           table.replaceWith(wrap);
           wrap.append(table);
         }
-        if (isAboveViewport) {
-          scroller.scrollTop +=
-            section.getBoundingClientRect().height - before.height;
+        // Where the bottom edge is now, not how much the height changed: a section that shrinks at
+        // the end of the document has already been pulled up by the browser, which clamps scrollTop.
+        if (growsUpward) {
+          scroller.scrollTop += section.getBoundingClientRect().bottom - before.bottom;
         }
         setTimeout(() => {
           if (cancelled || !mounted.has(index)) return;
@@ -147,11 +174,19 @@ export default function LargeReader({
       )
       .catch(onError);
     for (const section of sections) observer.observe(section);
-    const reveal = async (index: number, anchor?: string) => {
+    // `live` is asked again after the section's HTML arrives: a find step closed meanwhile stops.
+    const reveal = async (index: number, anchor?: string, live = () => true) => {
       if (!sections[index]) return;
       wanted.add(index);
       await mount(index);
       if (cancelled) return;
+      // Only the observer takes a section out of `wanted`, and it reports only a change. A step
+      // dropped while its section loaded never scrolled there, and a later step's scroll in the
+      // same frame hides this one's. Observing again delivers a fresh report either way, so the
+      // observer decides: evicted if off screen, kept if the reader is there.
+      observer.unobserve(sections[index]);
+      observer.observe(sections[index]);
+      if (!live()) return;
       sections[index].scrollIntoView({ block: "start" });
       if (anchor)
         requestAnimationFrame(() =>
@@ -165,43 +200,42 @@ export default function LargeReader({
       const heading = doc.info.headings.find((h) => h.id === id);
       if (heading) void reveal(heading.chunk, id).catch(onError);
     };
+    // The nth match inside one section, counted by the same matcher as the find box.
+    let latestStep = 0;
     const search = (e: Event) => {
-      const { chunk, query } = (
-        e as CustomEvent<{ chunk: number; query: string }>
+      const { chunk, query, nth, generation } = (
+        e as CustomEvent<{ chunk: number; query: string; nth: number; generation: number }>
       ).detail;
-      void reveal(chunk)
+      // The bar was closed or the query changed before this step arrived: no scroll, no mark.
+      if (generation !== matchGeneration()) return;
+      // Steps arrive in the order the counter moves, but their sections can finish loading in any
+      // order. Only the newest may scroll and mark, so the mark is the match the counter names.
+      const step = ++latestStep;
+      const live = () => step === latestStep && generation === matchGeneration();
+      void reveal(chunk, undefined, live)
         .then(() => {
           requestAnimationFrame(() => {
+            if (!live()) return;
             const section = sections[chunk];
-            const walker = document.createTreeWalker(
-              section,
-              NodeFilter.SHOW_TEXT,
-            );
-            let node;
-            while ((node = walker.nextNode())) {
-              const index = node
-                .textContent!.toLowerCase()
-                .indexOf(query.toLowerCase());
-              if (index >= 0) {
-                const range = document.createRange();
-                range.setStart(node, index);
-                range.setEnd(node, index + query.length);
-                const selection = getSelection();
-                selection?.removeAllRanges();
-                selection?.addRange(range);
-                node.parentElement?.scrollIntoView({ block: "center" });
-                break;
-              }
-            }
+            const index = indexText(section);
+            const matches = findMatches(index.text, query);
+            if (!matches.length) return;
+            const pane = section.closest<HTMLElement>(".reading-scroll");
+            if (pane)
+              showMatch(pane, section, matches[Math.min(nth, matches.length - 1)], generation);
           });
         })
         .catch(onError);
     };
     window.addEventListener("paneless:anchor", anchor);
     window.addEventListener("paneless:search", search);
+    const stopWatching = onMatchChange(sweep);
+    document.addEventListener("selectionchange", sweep);
     return () => {
       cancelled = true;
       observer.disconnect();
+      stopWatching();
+      document.removeEventListener("selectionchange", sweep);
       window.removeEventListener("paneless:anchor", anchor);
       window.removeEventListener("paneless:search", search);
     };

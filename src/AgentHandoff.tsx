@@ -32,7 +32,9 @@ export default function AgentHandoff({
       previous?.focus();
     };
   }, [snapshot]);
-  const act = async (action: "copy" | "codex" | "claude-open") => {
+  const act = async (
+    action: "copy" | "codex" | "claude-open",
+  ) => {
     if (pending || !context) return;
     setPending(true);
     setError("");
@@ -49,15 +51,20 @@ export default function AgentHandoff({
         ).writeText(prompt);
       else await navigator.clipboard.writeText(prompt);
       if (action === "claude-open") {
-        const included = await command<boolean>("open_claude", {
+        const opened = await command<
+          | { kind: "newWithPrompt" | "newWithoutPrompt" }
+          | { kind: "existingSession"; session: string }
+        >("open_claude", {
           id: snapshot.info.id,
           workspace: fresh.workspace,
           prompt,
         });
         setMessage(
-          included
-            ? "Opened in Claude's Code tab with the prompt filled in, not sent. Confirm the folder there. Context also copied."
-            : "Opened Claude's Code tab on the workspace. The prompt was too long for the link; paste it (it is copied).",
+          opened.kind === "existingSession"
+            ? `Switched to your Claude Code session “${opened.session}”. Nothing was sent: the context is copied, so paste it there (⌘V) and press Enter.`
+            : opened.kind === "newWithPrompt"
+              ? "Opened in Claude's Code tab with the prompt filled in, not sent. Confirm the folder there. Context also copied."
+              : "Opened Claude's Code tab on the workspace. The prompt was too long for the link; paste it (it is copied).",
         );
       } else if (action === "codex") {
         const included = await command<boolean>("open_codex", {
@@ -172,8 +179,9 @@ export default function AgentHandoff({
         </button>
       </div>
       <p className="handoff-hint">
-        Codex opens a draft for review. Claude Code opens the desktop app's
-        Code tab with the prompt filled in; nothing is sent until you press
+        Codex opens a draft for review. Claude Code opens the session already
+        working on this folder, with the context copied to paste, or else a
+        new one with the prompt filled in; nothing is sent until you press
         Enter.
       </p>
       <p className="handoff-result" role="status">
